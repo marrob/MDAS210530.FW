@@ -6,7 +6,7 @@
   ******************************************************************************
   * @attention
   *
-  * <h2><center>&copy; Copyright (c) 2021 STMicroelectronics.
+  * <h2><center>&copy; Copyright (c) 2020 STMicroelectronics.
   * All rights reserved.</center></h2>
   *
   * This software component is licensed by ST under BSD 3-Clause license,
@@ -23,6 +23,10 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
+#include "common.h"
+#include "vt100.h"
+#include "LiveLed.h"
+#include "StringPlus.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -40,15 +44,23 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
+LiveLED_HnadleTypeDef hLiveLed;
+uint32_t UartRxTimestamp;
 
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_USART1_UART_Init(void);
 /* USER CODE BEGIN PFP */
+void LiveLedOff(void);
+void LiveLedOn(void);
+
+
 
 /* USER CODE END PFP */
 
@@ -73,7 +85,11 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
-
+  /*** LiveLed ***/
+  hLiveLed.LedOffFnPtr = &LiveLedOff;
+  hLiveLed.LedOnFnPtr = &LiveLedOn;
+  hLiveLed.HalfPeriodTimeMs = 500;
+  LiveLedInit(&hLiveLed);
   /* USER CODE END Init */
 
   /* Configure the system clock */
@@ -85,7 +101,27 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
+
+  DelayMs(500);
+
+
+  printf(VT100_CLEARSCREEN);
+  printf(VT100_CURSORHOME);
+  printf(VT100_ATTR_RESET);
+
+#ifdef DEBUG
+  printf(VT100_ATTR_RED);
+    DeviceUsrLog("This is a DEBUG version.");
+  printf(VT100_ATTR_RESET);
+#endif
+
+  DeviceUsrLog("Manufacturer:%s, Name:%s, Version:%04X",DEVICE_MNF, DEVICE_NAME, DEVICE_FW);
+
+
+UartRxTimestamp = HAL_GetTick();
+
 
   /* USER CODE END 2 */
 
@@ -96,6 +132,7 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    LiveLedTask(&hLiveLed);
   }
   /* USER CODE END 3 */
 }
@@ -138,6 +175,39 @@ void SystemClock_Config(void)
 }
 
 /**
+  * @brief USART1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART1_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART1_Init 0 */
+
+  /* USER CODE END USART1_Init 0 */
+
+  /* USER CODE BEGIN USART1_Init 1 */
+
+  /* USER CODE END USART1_Init 1 */
+  huart1.Instance = USART1;
+  huart1.Init.BaudRate = 115200;
+  huart1.Init.WordLength = UART_WORDLENGTH_8B;
+  huart1.Init.StopBits = UART_STOPBITS_1;
+  huart1.Init.Parity = UART_PARITY_NONE;
+  huart1.Init.Mode = UART_MODE_TX_RX;
+  huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART1_Init 2 */
+
+  /* USER CODE END USART1_Init 2 */
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -163,6 +233,44 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+/* printf -------------------------------------------------------------------*/
+
+//int _write(int file, char *ptr, int len)
+//{
+//  int i=0;
+//  for(i=0 ; i<len ; i++)
+//    ITM_SendChar((*ptr++));
+//  return len;
+//}
+
+int _write(int file, char *ptr, int len)
+{
+  HAL_UART_Transmit(&huart1, (uint8_t*)ptr, len, 100);
+  return len;
+}
+
+//int _write(int file, char *ptr, int len)
+//{
+//  return len;
+//}
+
+
+
+
+
+
+/* LEDs ---------------------------------------------------------------------*/
+void LiveLedOn(void)
+{
+  HAL_GPIO_WritePin(LIVE_LED_GPIO_Port, LIVE_LED_Pin, GPIO_PIN_SET);
+}
+
+void LiveLedOff(void)
+{
+  HAL_GPIO_WritePin(LIVE_LED_GPIO_Port, LIVE_LED_Pin, GPIO_PIN_RESET);
+}
+
+
 
 /* USER CODE END 4 */
 
@@ -174,10 +282,7 @@ void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
-  __disable_irq();
-  while (1)
-  {
-  }
+
   /* USER CODE END Error_Handler_Debug */
 }
 
@@ -193,7 +298,7 @@ void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */
   /* User can add his own implementation to report the file name and line number,
-     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
+     tex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
