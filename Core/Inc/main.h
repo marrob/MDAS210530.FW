@@ -33,6 +33,7 @@ extern "C" {
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
+
 /* USER CODE END Includes */
 
 /* Exported types ------------------------------------------------------------*/
@@ -87,6 +88,36 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
+#define MV341_I_AIN0_Pin GPIO_PIN_0
+#define MV341_I_AIN0_GPIO_Port GPIOA
+#define MV205_I_AIN1_Pin GPIO_PIN_1
+#define MV205_I_AIN1_GPIO_Port GPIOA
+#define MV205_I_AIN2_Pin GPIO_PIN_2
+#define MV205_I_AIN2_GPIO_Port GPIOA
+#define U_MAIN_AIN3_Pin GPIO_PIN_3
+#define U_MAIN_AIN3_GPIO_Port GPIOA
+#define MV341_TEMP_AIN4_Pin GPIO_PIN_4
+#define MV341_TEMP_AIN4_GPIO_Port GPIOA
+#define MV205_1_TEMP_AIN5_Pin GPIO_PIN_5
+#define MV205_1_TEMP_AIN5_GPIO_Port GPIOA
+#define MV205_2_TEMP_AIN6_Pin GPIO_PIN_6
+#define MV205_2_TEMP_AIN6_GPIO_Port GPIOA
+#define MV205_1_EN_Pin GPIO_PIN_1
+#define MV205_1_EN_GPIO_Port GPIOB
+#define MV205_2_EN_Pin GPIO_PIN_2
+#define MV205_2_EN_GPIO_Port GPIOB
+#define INT_EXT_Pin GPIO_PIN_10
+#define INT_EXT_GPIO_Port GPIOB
+#define LOCK2_Pin GPIO_PIN_12
+#define LOCK2_GPIO_Port GPIOB
+#define LOCK1_Pin GPIO_PIN_13
+#define LOCK1_GPIO_Port GPIOB
+#define LED3_Pin GPIO_PIN_4
+#define LED3_GPIO_Port GPIOB
+#define LED2_Pin GPIO_PIN_5
+#define LED2_GPIO_Port GPIOB
+#define LED1_Pin GPIO_PIN_6
+#define LED1_GPIO_Port GPIOB
 #define LIVE_LED_Pin GPIO_PIN_7
 #define LIVE_LED_GPIO_Port GPIOB
 /* USER CODE BEGIN Private defines */
@@ -103,8 +134,6 @@ void Error_Handler(void);
 #define DEVICE_OK           0
 #define DEVICE_FAIL         1
 
-
-/* VT100 ---------------------------------------------------------------------*/
 
 /* USER CODE END Private defines */
 
