@@ -22,11 +22,12 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <string.h>
 #include "common.h"
 #include "vt100.h"
 #include "LiveLed.h"
 #include "StringPlus.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -40,8 +41,9 @@ typedef struct _AdcChannelsTypeDef{
   uint16_t MV341_Temp;
   uint16_t MV205_1_Temp;
   uint16_t MV205_2_Temp;
+  //uint16_t Vref;
 }AdcChannelsTypeDef;
-
+#define ADC_CH_COUNT sizeof(AdcChannelsTypeDef)/sizeof(uint16_t)
 
 typedef struct _MeasurementsTypeDef{
   double MV341_I;
@@ -51,7 +53,10 @@ typedef struct _MeasurementsTypeDef{
   double MV341_Temp;
   double MV205_1_Temp;
   double MV205_2_Temp;
+  double Vref;
 }MeasurementsTypeDef;
+
+
 
 typedef struct _DeviceTypeDef
 {
@@ -69,6 +74,7 @@ typedef struct _DeviceTypeDef
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define UART_BUFFER_SIZE 16
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -81,13 +87,16 @@ ADC_HandleTypeDef hadc1;
 DMA_HandleTypeDef hdma_adc1;
 
 UART_HandleTypeDef huart1;
+DMA_HandleTypeDef hdma_usart1_rx;
 
 /* USER CODE BEGIN PV */
 LiveLED_HnadleTypeDef hLiveLed;
 uint32_t UartRxTimestamp;
 DeviceTypeDef     Device;
 AdcChannelsTypeDef   AdcChannelsResult;
-
+char UartRxBuffer[UART_BUFFER_SIZE];
+char UartTxBuffer[UART_BUFFER_SIZE];
+char Receive[UART_BUFFER_SIZE];
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -100,8 +109,9 @@ static void MX_ADC1_Init(void);
 void LiveLedOff(void);
 void LiveLedOn(void);
 void MV205Enable(void);
-uint32_t AdcGetValue(void);
-
+void AcdTask(void);
+void StateMachineTask(void);
+void UartTask(void);
 
 
 
@@ -112,11 +122,19 @@ uint32_t AdcGetValue(void);
 
 
 /* Measurements --------------------------------------------------------------*/
+void AcdTask(void)
+{
+  static uint32_t timestamp=0;
+  if(HAL_GetTick() - timestamp > 1000){
+    timestamp = HAL_GetTick();
+    HAL_ADC_Start_DMA(&hadc1, (uint32_t*)&AdcChannelsResult, ADC_CH_COUNT);
+  }
+}
+
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 {
-  DeviceDbgLog("HAL_ADC_ConvCpltCallback, %lu", Device.AdcUpdated++);
-
+  DeviceDbgLog("HAL_ADC_ConvCpltCallback %lu", Device.AdcUpdated++);
 
   double lsb = 3.3/4096; //0.000805
 
@@ -126,10 +144,90 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
   //pl:  0.050A * 0.1R * x20 = 0.1V
   //Imért = (ADC * LSB) / 20 / 0.1R
   Device.Meas.MV341_I = (AdcChannelsResult.MV341_I * lsb) / 20 / 0.1;
+  Device.Meas.MV205_1_I = (AdcChannelsResult.MV205_1_I * lsb) / 20 / 0.1;
+  Device.Meas.MV205_2_I = (AdcChannelsResult.MV205_2_I * lsb) / 20 / 0.1;
+
+  //0C = 0.5
+  //10fok változás = 0.1V változás
+  Device.Meas.MV341_Temp = ((AdcChannelsResult.MV341_Temp * lsb) - 0.5) * 100;
+  Device.Meas.MV205_1_Temp = ((AdcChannelsResult.MV205_1_Temp * lsb) - 0.5) * 100;
+  Device.Meas.MV205_2_Temp = ((AdcChannelsResult.MV205_2_Temp * lsb) - 0.5) * 100;
+
+  //Device.Meas.Vref = AdcChannelsResult.Vref * lsb;
+
+  //DeviceDbgLog("U_MAIN:%02fV",  Device.Meas.U_MAIN);
+}
+
+/* UART ----------------------------------------------------------------------*/
 
 
- DeviceDbgLog("U_MAIN:%02fV",  Device.Meas.U_MAIN);
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+    //HAL_UART_Transmit(&huart1, UART1_rxBuffer, 12, 100);
+    HAL_UART_Receive_DMA(&huart1, (uint8_t*) UartRxBuffer, UART_BUFFER_SIZE);
+}
 
+void UartTask(void)
+{
+  static uint32_t timestamp=0;
+
+  if(HAL_GetTick() - timestamp > 1000)
+  {
+    timestamp = HAL_GetTick();
+
+
+    if(strlen(UartRxBuffer)!=0)
+    {
+
+      for(uint8_t i=0; i<strlen(UartRxBuffer);i++)
+        if(UartRxBuffer[i]=='\r')
+          UartRxBuffer[i]=0;
+
+      for(uint8_t i=0; i<strlen(UartRxBuffer);i++)
+        if(UartRxBuffer[i]=='\n')
+          UartRxBuffer[i]=0;
+
+
+      if(!strcmp(UartRxBuffer , "*OPC?"))
+      {
+        strcpy(UartTxBuffer, "*OPC");
+      }
+    }
+
+
+
+    if(strlen(UartTxBuffer)!=0)
+    {
+      HAL_UART_DMAStop(&huart1);
+      HAL_UART_Transmit(&huart1, (uint8_t*) UartTxBuffer, sizeof(UartTxBuffer), 100);
+      memset(UartTxBuffer,0x00,UART_BUFFER_SIZE);
+      memset(UartRxBuffer,0x00,UART_BUFFER_SIZE);
+      HAL_UART_Receive_DMA(&huart1, (uint8_t*) UartRxBuffer, UART_BUFFER_SIZE);
+    }
+
+  }
+}
+
+/* StateMachineTask -----------------------------------------------------------*/
+void StateMachineTask(void)
+{
+  static uint32_t timestamp=0;
+
+  if(HAL_GetTick() - timestamp > 1000)
+  {
+    timestamp = HAL_GetTick();
+
+    if(HAL_GPIO_ReadPin(LOCK1_GPIO_Port,LOCK1_Pin ) == GPIO_PIN_SET)
+      HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_SET);
+    else
+      HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_RESET);
+
+
+    if(HAL_GPIO_ReadPin(LOCK2_GPIO_Port, LOCK2_Pin ) == GPIO_PIN_SET)
+        HAL_GPIO_WritePin(LED3_GPIO_Port, LED3_Pin, GPIO_PIN_SET);
+      else
+        HAL_GPIO_WritePin(LED3_GPIO_Port, LED3_Pin, GPIO_PIN_RESET);
+  }
 }
 
 
@@ -148,7 +246,7 @@ int main(void)
   /* MCU Configuration--------------------------------------------------------*/
 
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-       HAL_Init();
+  HAL_Init();
 
   /* USER CODE BEGIN Init */
   /*** LiveLed ***/
@@ -186,13 +284,9 @@ int main(void)
 #endif
 
   DeviceUsrLog("Manufacturer:%s, Name:%s, Version:%04X",DEVICE_MNF, DEVICE_NAME, DEVICE_FW);
+  UartRxTimestamp = HAL_GetTick();
 
-
-UartRxTimestamp = HAL_GetTick();
-
-
-
-
+  HAL_UART_Receive_DMA (&huart1, (uint8_t*)UartRxBuffer, UART_BUFFER_SIZE);
 
 
   /* USER CODE END 2 */
@@ -204,27 +298,11 @@ UartRxTimestamp = HAL_GetTick();
     static uint32_t timestamp=0;
 
     LiveLedTask(&hLiveLed);
+    AcdTask();
+    StateMachineTask();
+    UartTask();
 
     Device.Status.MainCycleTime = HAL_GetTick() - timestamp;
-
-
-    if(HAL_GetTick() - timestamp > 1000){
-      timestamp = HAL_GetTick();
-
-      HAL_ADC_Start_DMA(&hadc1, (uint32_t*)&AdcChannelsResult, 7);
-
-
-   if(HAL_GPIO_ReadPin(LOCK1_GPIO_Port,LOCK1_Pin ) == GPIO_PIN_SET)
-     HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_SET);
-   else
-     HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_RESET);
-
-
-   if(HAL_GPIO_ReadPin(LOCK2_GPIO_Port, LOCK2_Pin ) == GPIO_PIN_SET)
-       HAL_GPIO_WritePin(LED3_GPIO_Port, LED3_Pin, GPIO_PIN_SET);
-     else
-       HAL_GPIO_WritePin(LED3_GPIO_Port, LED3_Pin, GPIO_PIN_RESET);
-    }
 
     /* USER CODE END WHILE */
 
@@ -417,6 +495,9 @@ static void MX_DMA_Init(void)
   /* DMA1_Channel1_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
+  /* DMA1_Channel5_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel5_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel5_IRQn);
 
 }
 
@@ -456,59 +537,12 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
-
-
 /* printf -------------------------------------------------------------------*/
-
-//int _write(int file, char *ptr, int len)
-//{
-//  int i=0;
-//  for(i=0 ; i<len ; i++)
-//    ITM_SendChar((*ptr++));
-//  return len;
-//}
-
 int _write(int file, char *ptr, int len)
 {
   HAL_UART_Transmit(&huart1, (uint8_t*)ptr, len, 100);
   return len;
 }
-
-//int _write(int file, char *ptr, int len)
-//{
-//  return len;
-//}
-
-
-/* printf -------------------------------------------------------------------*/
-
-uint32_t AdcGetValue(void)
-{
-//  ADC_ChannelConfTypeDef   sConfig;
-//  sConfig.Channel      = ADC_CHANNEL_3;
-//  sConfig.Rank         = ADC_REGULAR_RANK_1;
-//  sConfig.SamplingTime = ADC_SAMPLETIME_41CYCLES_5;
-//
-//  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
-//  {
-//    DeviceErrLog("HAL_ADC_ConfigChannel.");
-//  }
-
-  if(HAL_ADC_Start(&hadc1) != HAL_OK)
-    DeviceErrLog("HAL_ADC_Start Fail");
-
-  if(HAL_ADC_PollForConversion(&hadc1, 10) != HAL_OK)
-    DeviceErrLog("HAL_ADC_PollForConversion Fail");
-
-  uint32_t value = HAL_ADC_GetValue(&hadc1);
-
-  if(HAL_ADC_Stop(&hadc1) != HAL_OK)
-    DeviceErrLog("HAL_ADC_PollForConversion Fail");
-
-  return value;
-}
-
-
 
 /* LEDs ---------------------------------------------------------------------*/
 void LiveLedOn(void)
@@ -520,7 +554,6 @@ void LiveLedOff(void)
 {
   HAL_GPIO_WritePin(LIVE_LED_GPIO_Port, LIVE_LED_Pin, GPIO_PIN_RESET);
 }
-
 
 void MV205Enable(void){
 
