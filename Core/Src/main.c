@@ -32,29 +32,37 @@
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
 
-typedef  struct _AdcRawChannelsTypeDef{
-  uint16_t ain0;
-  uint16_t ain1;
-  uint16_t ain2;
-  uint16_t ain3;
-  uint16_t ain4;
-  uint16_t ain5;
-  uint16_t ain6;
-}AdcRawChannelsTypeDef;
+typedef struct _AdcChannelsTypeDef{
+  uint16_t MV341_I;
+  uint16_t MV205_1_I;
+  uint16_t MV205_2_I;
+  uint16_t U_MAIN;
+  uint16_t MV341_Temp;
+  uint16_t MV205_1_Temp;
+  uint16_t MV205_2_Temp;
+}AdcChannelsTypeDef;
 
-uint32_t adctemp[7];
 
-typedef struct _AppTypeDef
+typedef struct _MeasurementsTypeDef{
+  double MV341_I;
+  double MV205_1_I;
+  double MV205_2_I;
+  double U_MAIN;
+  double MV341_Temp;
+  double MV205_1_Temp;
+  double MV205_2_Temp;
+}MeasurementsTypeDef;
+
+typedef struct _DeviceTypeDef
 {
-
+  MeasurementsTypeDef Meas;
   struct _status
   {
     uint32_t MainCycleTime;
   }Status;
 
 
-  double MV341_Current;
-
+  uint32_t AdcUpdated;
 }DeviceTypeDef;
 
 /* USER CODE END PTD */
@@ -78,8 +86,8 @@ UART_HandleTypeDef huart1;
 LiveLED_HnadleTypeDef hLiveLed;
 uint32_t UartRxTimestamp;
 DeviceTypeDef     Device;
-AdcRawChannelsTypeDef   AdcResult;
-uint16_t AD_RES = 0;
+AdcChannelsTypeDef   AdcChannelsResult;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -102,6 +110,29 @@ uint32_t AdcGetValue(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+
+/* Measurements --------------------------------------------------------------*/
+
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
+{
+  DeviceDbgLog("HAL_ADC_ConvCpltCallback, %lu", Device.AdcUpdated++);
+
+
+  double lsb = 3.3/4096; //0.000805
+
+  //Ha a táp 10V, akkor R229 és R228 között 1.31V-mérhető... Uin=9.55V és 9.21V-ot jelez
+  Device.Meas.U_MAIN = AdcChannelsResult.U_MAIN * lsb* 1 / (2.4/(15 + 2.4));
+
+  //pl:  0.050A * 0.1R * x20 = 0.1V
+  //Imért = (ADC * LSB) / 20 / 0.1R
+  Device.Meas.MV341_I = (AdcChannelsResult.MV341_I * lsb) / 20 / 0.1;
+
+
+ DeviceDbgLog("U_MAIN:%02fV",  Device.Meas.U_MAIN);
+
+}
+
+
 /* USER CODE END 0 */
 
 /**
@@ -117,7 +148,7 @@ int main(void)
   /* MCU Configuration--------------------------------------------------------*/
 
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-  HAL_Init();
+       HAL_Init();
 
   /* USER CODE BEGIN Init */
   /*** LiveLed ***/
@@ -174,16 +205,14 @@ UartRxTimestamp = HAL_GetTick();
 
     LiveLedTask(&hLiveLed);
 
-    //Device.Status.MainCycleTime = HAL_GetTick() - timestamp;
+    Device.Status.MainCycleTime = HAL_GetTick() - timestamp;
 
 
     if(HAL_GetTick() - timestamp > 1000){
       timestamp = HAL_GetTick();
 
-     // HAL_ADC_Start_DMA(&hadc1, &AD_RES, 1);
-      HAL_ADC_Start_DMA(&hadc1, (uint32_t*)&AdcResult, 7);
+      HAL_ADC_Start_DMA(&hadc1, (uint32_t*)&AdcChannelsResult, 7);
 
-     // DeviceDbgLog("ADC result: 0x%lX", AdcGetValue());
 
    if(HAL_GPIO_ReadPin(LOCK1_GPIO_Port,LOCK1_Pin ) == GPIO_PIN_SET)
      HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_SET);
@@ -283,7 +312,7 @@ static void MX_ADC1_Init(void)
   */
   sConfig.Channel = ADC_CHANNEL_0;
   sConfig.Rank = ADC_REGULAR_RANK_1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
+  sConfig.SamplingTime = ADC_SAMPLETIME_239CYCLES_5;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -428,10 +457,6 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 
 
-void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
-{
-  DeviceDbgLog("HAL_ADC_ConvCpltCallback");
-}
 
 /* printf -------------------------------------------------------------------*/
 
