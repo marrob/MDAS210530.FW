@@ -11,3 +11,15 @@ DAS Clock problémák
 - a proci túl kicsit nagyobbat kellett volna választani
 
 
+- Panel tápfeszültsége kb:14V-15V
+power up szekvencia:
+- MV341 - nagy áramot vesz fel mert melegszik, 
+  ez egyböl indul, de ha küls órajel van (Int/Ext).
+  akkor nem kell bevárni a külso IntExt.
+  hiba állapotok megvalósítás.
+- 300mA lecsökken: ezt meg kell majd nézni 100mA-körül már biztos befüteni
+- MV205 - 200mA/80mA és csökken
+....
+A homérésékeltének tájkoztató jellegu 
+
+A Lockok csak bemnetek... pozotiv logikában...

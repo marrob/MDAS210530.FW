@@ -46,9 +46,9 @@ typedef struct _AdcChannelsTypeDef{
 #define ADC_CH_COUNT sizeof(AdcChannelsTypeDef)/sizeof(uint16_t)
 
 typedef struct _MeasurementsTypeDef{
-  double MV341_I;
-  double MV205_1_I;
-  double MV205_2_I;
+  double MV341_I_mA;
+  double MV205_1_I_mA;
+  double MV205_2_I_mA;
   double U_MAIN;
   double MV341_Temp;
   double MV205_1_Temp;
@@ -56,18 +56,40 @@ typedef struct _MeasurementsTypeDef{
   double Vref;
 }MeasurementsTypeDef;
 
+typedef enum _CtrlStatesTypeDef
+{
+  SDEV_START,                   //0
+  SDEV_IDLE,                    //1
+  SDEV_MV341_WARMING,           //2
+  SDEV_MV341_WARM_CPLT,         //3
+  SDEV_MV205_1_WARMING,         //4
+  SDEV_MV205_1_WARM_CPLT,       //5
+  SDEV_MV205_2_WARMING,         //6
+  SDEV_MV205_2_WARM_CPLT,       //7
+  SDEV_WARMING_SEQ_CPLT,        //8
 
+}CtrlStatesTypeDef;
 
 typedef struct _DeviceTypeDef
 {
+  uint8_t ExtRefOscEnabled;
   MeasurementsTypeDef Meas;
+
   struct _status
   {
+    uint32_t AdcUpdatedCnt;
     uint32_t MainCycleTime;
   }Status;
 
+  struct
+  {
+    CtrlStatesTypeDef Next;
+    CtrlStatesTypeDef Curr;
+    CtrlStatesTypeDef Pre;
+  }State;
 
-  uint32_t AdcUpdated;
+
+
 }DeviceTypeDef;
 
 /* USER CODE END PTD */
@@ -91,7 +113,6 @@ DMA_HandleTypeDef hdma_usart1_rx;
 
 /* USER CODE BEGIN PV */
 LiveLED_HnadleTypeDef hLiveLed;
-uint32_t UartRxTimestamp;
 DeviceTypeDef     Device;
 AdcChannelsTypeDef   AdcChannelsResult;
 char UartRxBuffer[UART_BUFFER_SIZE];
@@ -110,8 +131,12 @@ void LiveLedOff(void);
 void LiveLedOn(void);
 void MV205Enable(void);
 void AcdTask(void);
-void StateMachineTask(void);
+void ControlTask(void);
 void UartTask(void);
+uint8_t DoesExtRefOscEnable(void);
+void ControlBothMv205Enable(void);
+void ControlMV205_1(uint8_t enable);
+void ControlMV205_2(uint8_t enable);
 
 
 
@@ -134,7 +159,7 @@ void AcdTask(void)
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 {
-  DeviceDbgLog("HAL_ADC_ConvCpltCallback %lu", Device.AdcUpdated++);
+  DeviceDbgLog("HAL_ADC_ConvCpltCallback %lu", Device.Status.AdcUpdatedCnt++);
 
   double lsb = 3.3/4096; //0.000805
 
@@ -143,9 +168,9 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 
   //pl:  0.050A * 0.1R * x20 = 0.1V
   //Imért = (ADC * LSB) / 20 / 0.1R
-  Device.Meas.MV341_I = (AdcChannelsResult.MV341_I * lsb) / 20 / 0.1;
-  Device.Meas.MV205_1_I = (AdcChannelsResult.MV205_1_I * lsb) / 20 / 0.1;
-  Device.Meas.MV205_2_I = (AdcChannelsResult.MV205_2_I * lsb) / 20 / 0.1;
+  Device.Meas.MV341_I_mA = (AdcChannelsResult.MV341_I * lsb) / 20 / 0.1;
+  Device.Meas.MV205_1_I_mA = (AdcChannelsResult.MV205_1_I * lsb) / 20 / 0.1;
+  Device.Meas.MV205_2_I_mA = (AdcChannelsResult.MV205_2_I * lsb) / 20 / 0.1;
 
   //0C = 0.5
   //10fok változás = 0.1V változás
@@ -174,8 +199,6 @@ void UartTask(void)
   if(HAL_GetTick() - timestamp > 1000)
   {
     timestamp = HAL_GetTick();
-
-
     if(strlen(UartRxBuffer)!=0)
     {
 
@@ -194,8 +217,6 @@ void UartTask(void)
       }
     }
 
-
-
     if(strlen(UartTxBuffer)!=0)
     {
       HAL_UART_DMAStop(&huart1);
@@ -204,12 +225,11 @@ void UartTask(void)
       memset(UartRxBuffer,0x00,UART_BUFFER_SIZE);
       HAL_UART_Receive_DMA(&huart1, (uint8_t*) UartRxBuffer, UART_BUFFER_SIZE);
     }
-
   }
 }
 
 /* StateMachineTask -----------------------------------------------------------*/
-void StateMachineTask(void)
+void ControlTask(void)
 {
   static uint32_t timestamp=0;
 
@@ -228,6 +248,94 @@ void StateMachineTask(void)
       else
         HAL_GPIO_WritePin(LED3_GPIO_Port, LED3_Pin, GPIO_PIN_RESET);
   }
+
+  switch (Device.State.Curr)
+  {
+     case SDEV_START:
+     {
+       Device.State.Next = SDEV_IDLE;
+      // DeviceDbgLog("ControlTask: SDEV_START -> SDEV_IDLE");
+       break;
+     }
+
+     case SDEV_IDLE:
+     {
+       if(DoesExtRefOscEnable())
+       {
+    //     DeviceDbgLog("ControlTask.Mode: External ref osc...");
+         Device.State.Next = SDEV_MV205_1_WARMING;
+     //    DeviceDbgLog("ControlTask: SDEV_IDLE -> SDEV_MV205_1_WARMING");
+       }
+       else
+       {
+     //    DeviceDbgLog("ControlTask.Mode: Internal ref osc...");
+         Device.State.Next = SDEV_MV341_WARMING;
+     //    DeviceDbgLog("ControlTask: SDEV_IDLE -> SDEV_MV341_WARMING");
+       }
+       break;
+     }
+     case SDEV_MV341_WARMING:
+     {
+       if(Device.Meas.MV341_I_mA < 300)
+       {
+         Device.State.Next = SDEV_MV341_WARM_CPLT;
+      //   DeviceDbgLog("ControlTask: SDEV_MV341_WARMING -> SDEV_MV341_WARM_CPLT");
+       }
+       else
+       {
+         if(DoesExtRefOscEnable())
+         {
+        //   DeviceDbgLog("ControlTask.Mode: External ref osc...");
+           Device.State.Next = SDEV_MV205_1_WARMING;
+         //  DeviceDbgLog("ControlTask: SDEV_MV341_WARMING -> SDEV_MV205_1_WARMING")
+         }
+       }
+       break;
+     }
+     case SDEV_MV341_WARM_CPLT:
+     {
+       Device.State.Next = SDEV_MV205_1_WARMING;
+     //  DeviceDbgLog("ControlTask: SDEV_MV341_WARM_CPLT -> SDEV_MV205_1_WARMING");
+       break;
+     }
+     case SDEV_MV205_1_WARMING:
+     {
+       
+       if(Device.Meas.MV205_1_I_mA < 200)
+       {
+         Device.State.Next = SDEV_MV205_1_WARM_CPLT;
+     //    DeviceDbgLog("ControlTask: SDEV_MV341_WARMING -> SDEV_MV205_1_WARM_CPLT");
+       }
+       break;
+     }
+     case SDEV_MV205_1_WARM_CPLT:
+     {
+       Device.State.Next = SDEV_MV205_2_WARMING;
+   //    DeviceDbgLog("ControlTask: SDEV_MV205_1_WARM_CPLT -> SDEV_MV205_2_WARMING");
+     }
+     case SDEV_MV205_2_WARMING:
+     {
+       if(Device.Meas.MV205_2_I_mA < 200)
+       {
+         Device.State.Next = SDEV_MV205_2_WARM_CPLT;
+         DeviceDbgLog("ControlTask: SDEV_MV205_2_WARMING -> SDEV_MV205_2_WARM_CPLT");
+       }
+       break;
+     }
+     case SDEV_MV205_2_WARM_CPLT:
+     {
+       Device.State.Next = SDEV_WARMING_SEQ_CPLT;
+       DeviceDbgLog("ControlTask: SDEV_MV205_2_WARM_CPLT -> SDEV_WARMING_SEQ_CPLT");
+     }
+
+     case SDEV_WARMING_SEQ_CPLT:
+     {
+
+     }
+  }
+
+  Device.State.Pre = Device.State.Curr;
+  Device.State.Curr = Device.State.Next;
 }
 
 
@@ -271,7 +379,6 @@ int main(void)
   /* USER CODE BEGIN 2 */
 
   DelayMs(500);
-  MV205Enable();
 
   printf(VT100_CLEARSCREEN);
   printf(VT100_CURSORHOME);
@@ -284,7 +391,6 @@ int main(void)
 #endif
 
   DeviceUsrLog("Manufacturer:%s, Name:%s, Version:%04X",DEVICE_MNF, DEVICE_NAME, DEVICE_FW);
-  UartRxTimestamp = HAL_GetTick();
 
   HAL_UART_Receive_DMA (&huart1, (uint8_t*)UartRxBuffer, UART_BUFFER_SIZE);
 
@@ -299,7 +405,7 @@ int main(void)
 
     LiveLedTask(&hLiveLed);
     AcdTask();
-    StateMachineTask();
+    ControlTask();
     UartTask();
 
     Device.Status.MainCycleTime = HAL_GetTick() - timestamp;
@@ -538,11 +644,26 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 
 /* printf -------------------------------------------------------------------*/
+
+//UART
 int _write(int file, char *ptr, int len)
 {
   HAL_UART_Transmit(&huart1, (uint8_t*)ptr, len, 100);
   return len;
 }
+
+//SWO
+/*
+int _write(int file, char *ptr, int len)
+{
+  int i=0;
+  for(i=0 ; i<len ; i++)
+    ITM_SendChar((*ptr++));
+  return len;
+}
+*/
+
+
 
 /* LEDs ---------------------------------------------------------------------*/
 void LiveLedOn(void)
@@ -555,12 +676,33 @@ void LiveLedOff(void)
   HAL_GPIO_WritePin(LIVE_LED_GPIO_Port, LIVE_LED_Pin, GPIO_PIN_RESET);
 }
 
-void MV205Enable(void){
+void ControlBothMv205Enable(void){
 
   HAL_GPIO_WritePin(MV205_1_EN_GPIO_Port, MV205_1_EN_Pin, GPIO_PIN_RESET);
   HAL_GPIO_WritePin(MV205_2_EN_GPIO_Port, MV205_2_EN_Pin, GPIO_PIN_RESET);
- // HAL_GPIO_WritePin(LED3_GPIO_Port, LED3_Pin, GPIO_PIN_SET);
+}
 
+void ControlMV205_1(uint8_t enable)
+{
+  if(enable)
+    HAL_GPIO_WritePin(MV205_1_EN_GPIO_Port, MV205_1_EN_Pin, GPIO_PIN_SET);
+  else
+    HAL_GPIO_WritePin(MV205_1_EN_GPIO_Port, MV205_1_EN_Pin, GPIO_PIN_RESET);
+}
+
+void ControlMV205_2(uint8_t enable)
+{
+  if(enable)
+    HAL_GPIO_WritePin(MV205_1_EN_GPIO_Port, MV205_1_EN_Pin, GPIO_PIN_SET);
+  else
+    HAL_GPIO_WritePin(MV205_1_EN_GPIO_Port, MV205_1_EN_Pin, GPIO_PIN_RESET);
+}
+
+
+uint8_t DoesExtRefOscEnable(){
+  uint8_t temp;
+  temp = HAL_GPIO_ReadPin(LOCK2_GPIO_Port, LOCK2_Pin ) == GPIO_PIN_SET;
+  return temp;
 }
 
 
