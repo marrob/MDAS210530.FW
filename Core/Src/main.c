@@ -59,14 +59,15 @@ typedef struct _MeasurementsTypeDef{
 typedef enum _CtrlStatesTypeDef
 {
   SDEV_START,                   //0
-  SDEV_IDLE,                    //1
-  SDEV_MV341_WARMING,           //2
-  SDEV_MV341_WARM_CPLT,         //3
-  SDEV_MV205_1_WARMING,         //4
-  SDEV_MV205_1_WARM_CPLT,       //5
-  SDEV_MV205_2_WARMING,         //6
-  SDEV_MV205_2_WARM_CPLT,       //7
-  SDEV_WARMING_SEQ_CPLT,        //8
+  SDEV_WAIT,                    //1
+  SDEV_IDLE,                    //2
+  SDEV_MV341_WARMING,           //3
+  SDEV_MV341_WARM_CPLT,         //4
+  SDEV_MV205_1_WARMING,         //5
+  SDEV_MV205_1_WARM_CPLT,       //6
+  SDEV_MV205_2_WARMING,         //7
+  SDEV_MV205_2_WARM_CPLT,       //8
+  SDEV_WARMING_SEQ_CPLT,        //9
 
 }CtrlStatesTypeDef;
 
@@ -79,6 +80,9 @@ typedef struct _DeviceTypeDef
   {
     uint32_t AdcUpdatedCnt;
     uint32_t MainCycleTime;
+    uint32_t UartTaskCnt;
+    uint32_t SuccessParsedCmdCnt;
+
   }Status;
 
   struct
@@ -118,6 +122,7 @@ AdcChannelsTypeDef   AdcChannelsResult;
 char UartRxBuffer[UART_BUFFER_SIZE];
 char UartTxBuffer[UART_BUFFER_SIZE];
 char Receive[UART_BUFFER_SIZE];
+char StringTemp[80];
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -159,7 +164,7 @@ void AcdTask(void)
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 {
-  DeviceDbgLog("HAL_ADC_ConvCpltCallback %lu", Device.Status.AdcUpdatedCnt++);
+  Device.Status.AdcUpdatedCnt++;
 
   double lsb = 3.3/4096; //0.000805
 
@@ -180,42 +185,67 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 
   //Device.Meas.Vref = AdcChannelsResult.Vref * lsb;
 
-  //DeviceDbgLog("U_MAIN:%02fV",  Device.Meas.U_MAIN);
 }
 
 /* UART ----------------------------------------------------------------------*/
-
-
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
-{
-    //HAL_UART_Transmit(&huart1, UART1_rxBuffer, 12, 100);
-    HAL_UART_Receive_DMA(&huart1, (uint8_t*) UartRxBuffer, UART_BUFFER_SIZE);
-}
-
 void UartTask(void)
 {
   static uint32_t timestamp=0;
 
-  if(HAL_GetTick() - timestamp > 1000)
+  if(HAL_GetTick() - timestamp > 100)
   {
     timestamp = HAL_GetTick();
-    if(strlen(UartRxBuffer)!=0)
+    Device.Status.UartTaskCnt++;
+
+    if(strlen(UartRxBuffer)==0)
+      return;
+
+    for(uint8_t i=0; i<strlen(UartRxBuffer);i++)
+      if(UartRxBuffer[i]=='\r')
+        UartRxBuffer[i]=0;
+
+    for(uint8_t i=0; i<strlen(UartRxBuffer);i++)
+      if(UartRxBuffer[i]=='\n')
+        UartRxBuffer[i]=0;
+
+
+    if(!strcmp(UartRxBuffer , "*OPC?"))
     {
-
-      for(uint8_t i=0; i<strlen(UartRxBuffer);i++)
-        if(UartRxBuffer[i]=='\r')
-          UartRxBuffer[i]=0;
-
-      for(uint8_t i=0; i<strlen(UartRxBuffer);i++)
-        if(UartRxBuffer[i]=='\n')
-          UartRxBuffer[i]=0;
-
-
-      if(!strcmp(UartRxBuffer , "*OPC?"))
-      {
-        strcpy(UartTxBuffer, "*OPC");
-      }
+      Device.Status.SuccessParsedCmdCnt++;
+      strcpy(UartTxBuffer, "*OPC");
     }
+    else if(!strcmp(UartRxBuffer , "MV341_I_mA?"))
+    {
+      sprintf(UartTxBuffer, "%0.3f", Device.Meas.MV205_1_I_mA);
+    }
+    else if(!strcmp(UartRxBuffer , "MV205_1_I_mA?"))
+    {
+      sprintf(UartTxBuffer, "%0.3f", Device.Meas.MV205_1_I_mA);
+    }
+    else if(!strcmp(UartRxBuffer , "MV205_2_I_mA?"))
+    {
+      sprintf(UartTxBuffer, "%0.3f", Device.Meas.MV205_2_I_mA);
+    }
+    else if(!strcmp(UartRxBuffer , "U_MAIN?"))
+    {
+      sprintf(UartTxBuffer, "%0.3f", Device.Meas.U_MAIN);
+    }
+    else if(!strcmp(UartRxBuffer , "MV341_Temp?"))
+    {
+      sprintf(UartTxBuffer, "%0.3f", Device.Meas.MV341_Temp);
+    }
+    else if(!strcmp(UartRxBuffer , "MV205_1_Temp?"))
+    {
+      sprintf(UartTxBuffer, "%0.3f", Device.Meas.MV205_1_Temp);
+    }
+    else if(!strcmp(UartRxBuffer , "MV20  5_2_Temp?"))
+    {
+      sprintf(UartTxBuffer, "%0.3f", Device.Meas.MV205_2_Temp);
+    }
+
+    uint8_t resp_len =strlen(UartTxBuffer);
+    UartTxBuffer[resp_len]= '\r';
+    UartTxBuffer[++resp_len]= 0;
 
     if(strlen(UartTxBuffer)!=0)
     {
@@ -232,7 +262,7 @@ void UartTask(void)
 void ControlTask(void)
 {
   static uint32_t timestamp=0;
-
+/*
   if(HAL_GetTick() - timestamp > 1000)
   {
     timestamp = HAL_GetTick();
@@ -248,13 +278,28 @@ void ControlTask(void)
       else
         HAL_GPIO_WritePin(LED3_GPIO_Port, LED3_Pin, GPIO_PIN_RESET);
   }
+*/
 
   switch (Device.State.Curr)
   {
      case SDEV_START:
      {
-       Device.State.Next = SDEV_IDLE;
-      // DeviceDbgLog("ControlTask: SDEV_START -> SDEV_IDLE");
+
+         Device.State.Next = SDEV_WAIT;
+         timestamp = HAL_GetTick();
+         DeviceDbgLog("ControlTask: SDEV_START -> SDEV_WAIT");
+
+       break;
+     }
+
+     case SDEV_WAIT:
+     {
+       if(HAL_GetTick() - timestamp >= 1000 )
+       {
+         Device.State.Next = SDEV_IDLE;
+         DeviceDbgLog("ControlTask: SDEV_WAIT -> SDEV_IDLE");
+       }
+
        break;
      }
 
@@ -262,15 +307,15 @@ void ControlTask(void)
      {
        if(DoesExtRefOscEnable())
        {
-    //     DeviceDbgLog("ControlTask.Mode: External ref osc...");
+         DeviceDbgLog("ControlTask.Mode: External ref osc...");
          Device.State.Next = SDEV_MV205_1_WARMING;
-     //    DeviceDbgLog("ControlTask: SDEV_IDLE -> SDEV_MV205_1_WARMING");
+         DeviceDbgLog("ControlTask: SDEV_IDLE -> SDEV_MV205_1_WARMING");
        }
        else
        {
-     //    DeviceDbgLog("ControlTask.Mode: Internal ref osc...");
+         DeviceDbgLog("ControlTask.Mode: Internal ref osc...");
          Device.State.Next = SDEV_MV341_WARMING;
-     //    DeviceDbgLog("ControlTask: SDEV_IDLE -> SDEV_MV341_WARMING");
+         DeviceDbgLog("ControlTask: SDEV_IDLE -> SDEV_MV341_WARMING");
        }
        break;
      }
@@ -279,15 +324,15 @@ void ControlTask(void)
        if(Device.Meas.MV341_I_mA < 300)
        {
          Device.State.Next = SDEV_MV341_WARM_CPLT;
-      //   DeviceDbgLog("ControlTask: SDEV_MV341_WARMING -> SDEV_MV341_WARM_CPLT");
+         DeviceDbgLog("ControlTask: SDEV_MV341_WARMING -> SDEV_MV341_WARM_CPLT");
        }
        else
        {
          if(DoesExtRefOscEnable())
          {
-        //   DeviceDbgLog("ControlTask.Mode: External ref osc...");
+           DeviceDbgLog("ControlTask.Mode: External ref osc...");
            Device.State.Next = SDEV_MV205_1_WARMING;
-         //  DeviceDbgLog("ControlTask: SDEV_MV341_WARMING -> SDEV_MV205_1_WARMING")
+           DeviceDbgLog("ControlTask: SDEV_MV341_WARMING -> SDEV_MV205_1_WARMING")
          }
        }
        break;
@@ -295,7 +340,7 @@ void ControlTask(void)
      case SDEV_MV341_WARM_CPLT:
      {
        Device.State.Next = SDEV_MV205_1_WARMING;
-     //  DeviceDbgLog("ControlTask: SDEV_MV341_WARM_CPLT -> SDEV_MV205_1_WARMING");
+       DeviceDbgLog("ControlTask: SDEV_MV341_WARM_CPLT -> SDEV_MV205_1_WARMING");
        break;
      }
      case SDEV_MV205_1_WARMING:
@@ -304,14 +349,14 @@ void ControlTask(void)
        if(Device.Meas.MV205_1_I_mA < 200)
        {
          Device.State.Next = SDEV_MV205_1_WARM_CPLT;
-     //    DeviceDbgLog("ControlTask: SDEV_MV341_WARMING -> SDEV_MV205_1_WARM_CPLT");
+         DeviceDbgLog("ControlTask: SDEV_MV341_WARMING -> SDEV_MV205_1_WARM_CPLT");
        }
        break;
      }
      case SDEV_MV205_1_WARM_CPLT:
      {
        Device.State.Next = SDEV_MV205_2_WARMING;
-   //    DeviceDbgLog("ControlTask: SDEV_MV205_1_WARM_CPLT -> SDEV_MV205_2_WARMING");
+       DeviceDbgLog("ControlTask: SDEV_MV205_1_WARM_CPLT -> SDEV_MV205_2_WARMING");
      }
      case SDEV_MV205_2_WARMING:
      {
@@ -646,14 +691,14 @@ static void MX_GPIO_Init(void)
 /* printf -------------------------------------------------------------------*/
 
 //UART
-int _write(int file, char *ptr, int len)
+/*int _write(int file, char *ptr, int len)
 {
   HAL_UART_Transmit(&huart1, (uint8_t*)ptr, len, 100);
   return len;
-}
+}*/
 
 //SWO
-/*
+
 int _write(int file, char *ptr, int len)
 {
   int i=0;
@@ -661,7 +706,6 @@ int _write(int file, char *ptr, int len)
     ITM_SendChar((*ptr++));
   return len;
 }
-*/
 
 
 

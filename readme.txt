@@ -9,6 +9,7 @@ DAS Clock problémák
 - a float-os printf lib nem fér bele uC-be, vagy cserélünk vagy hexában kommunikálunk
 - nagyobacsaka offeszethibák is vannak az analóg mérésekben
 - a proci túl kicsit nagyobbat kellett volna választani
+- A prociba lebegőpontos számok nefértek de kiderült hogy parancsértelmező sem fog.
 
 
 - Panel tápfeszültsége kb:14V-15V

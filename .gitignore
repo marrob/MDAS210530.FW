@@ -12,3 +12,4 @@ Release/*
 *.opensdf
 *.tmp
 
+/Debug/
