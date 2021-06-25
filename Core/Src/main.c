@@ -82,7 +82,15 @@ typedef struct _DeviceTypeDef
     uint32_t MainCycleTime;
     uint32_t UartTaskCnt;
     uint32_t SuccessParsedCmdCnt;
-
+    uint32_t MV341_WarmUpMs;
+    uint32_t MV205_1_WarmUpMs;
+    uint32_t MV205_2_WarmUpMs;
+    uint8_t Lock_1;
+    uint8_t Lock_2;
+    uint8_t MV205_1_En;
+    uint8_t MV205_2_En;
+    uint32_t Seconds;
+    uint32_t QueryCnt;
   }Status;
 
   struct
@@ -100,7 +108,13 @@ typedef struct _DeviceTypeDef
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define UART_BUFFER_SIZE 16
+#define UART_BUFFER_SIZE        40
+#define CMDLINE_UNKNOWN_PARAMETER_ERROR    "!UNKNOWN PARAMETER ERROR '%s'"
+#define INTER_STATE_DEALY_MS    5000
+#define MV341_I_LIMIT_MA        300
+#define MV205_1_I_LIMIT_MA      200
+#define MV205_2_I_LIMIT_MA      200
+#define ADC_UPDATE_MS           500
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -122,7 +136,6 @@ AdcChannelsTypeDef   AdcChannelsResult;
 char UartRxBuffer[UART_BUFFER_SIZE];
 char UartTxBuffer[UART_BUFFER_SIZE];
 char Receive[UART_BUFFER_SIZE];
-char StringTemp[80];
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -140,10 +153,13 @@ void ControlTask(void);
 void UartTask(void);
 uint8_t DoesExtRefOscEnable(void);
 void ControlBothMv205Enable(void);
-void ControlMV205_1(uint8_t enable);
-void ControlMV205_2(uint8_t enable);
-
-
+void SetMV205_1(FunctionalState enable);
+void SetMV205_2(FunctionalState enable);
+void SetLock2Led(FunctionalState enable);
+void SetLock1Led(FunctionalState enable);
+void SetMV205EnLed(FunctionalState enable);
+FunctionalState GetLock2();
+FunctionalState GetLock1();
 
 /* USER CODE END PFP */
 
@@ -155,7 +171,7 @@ void ControlMV205_2(uint8_t enable);
 void AcdTask(void)
 {
   static uint32_t timestamp=0;
-  if(HAL_GetTick() - timestamp > 1000){
+  if(HAL_GetTick() - timestamp > ADC_UPDATE_MS){
     timestamp = HAL_GetTick();
     HAL_ADC_Start_DMA(&hadc1, (uint32_t*)&AdcChannelsResult, ADC_CH_COUNT);
   }
@@ -172,10 +188,10 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
   Device.Meas.U_MAIN = AdcChannelsResult.U_MAIN * lsb* 1 / (2.4/(15 + 2.4));
 
   //pl:  0.050A * 0.1R * x20 = 0.1V
-  //Imért = (ADC * LSB) / 20 / 0.1R
-  Device.Meas.MV341_I_mA = (AdcChannelsResult.MV341_I * lsb) / 20 / 0.1;
-  Device.Meas.MV205_1_I_mA = (AdcChannelsResult.MV205_1_I * lsb) / 20 / 0.1;
-  Device.Meas.MV205_2_I_mA = (AdcChannelsResult.MV205_2_I * lsb) / 20 / 0.1;
+  //Imért = (ADC * LSB) / 20 / 0.1R * 1000mA
+  Device.Meas.MV341_I_mA = (AdcChannelsResult.MV341_I * lsb) / 20 / 0.1 * 1000;
+  Device.Meas.MV205_1_I_mA = (AdcChannelsResult.MV205_1_I * lsb) / 20 / 0.1 * 1000;
+  Device.Meas.MV205_2_I_mA = (AdcChannelsResult.MV205_2_I * lsb) / 20 / 0.1 * 1000;
 
   //0C = 0.5
   //10fok változás = 0.1V változás
@@ -188,118 +204,145 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 }
 
 /* UART ----------------------------------------------------------------------*/
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+  DeviceErrLog("Megtelt");
+}
+
 void UartTask(void)
 {
-  static uint32_t timestamp=0;
 
-  if(HAL_GetTick() - timestamp > 100)
+  if(strlen(UartRxBuffer)==0)
+    return;
+
+  uint8_t terminated = 0;
+  for(uint8_t i=0; i<strlen(UartRxBuffer);i++)
+    if(UartRxBuffer[i]=='\r' || UartRxBuffer[i]=='\n')
+    {
+      UartRxBuffer[i]=0;
+      terminated = 1;
+    }
+
+  if(!terminated)
+     return;
+  else
+    HAL_UART_DMAStop(&huart1);
+
+  if(!strcmp(UartRxBuffer , "*OPC?"))
   {
-    timestamp = HAL_GetTick();
-    Device.Status.UartTaskCnt++;
+    Device.Status.SuccessParsedCmdCnt++;
+    strcpy(UartTxBuffer, "*OPC");
+  }
+  else if(!strcmp(UartRxBuffer , "MV341_I_mA?"))
+  {
+    sprintf(UartTxBuffer, "%0.3f", Device.Meas.MV341_I_mA);
+  }
+  else if(!strcmp(UartRxBuffer , "MV205_1_I_mA?"))
+  {
+    sprintf(UartTxBuffer, "%0.3f", Device.Meas.MV205_1_I_mA);
+  }
+  else if(!strcmp(UartRxBuffer , "MV205_2_I_mA?"))
+  {
+    sprintf(UartTxBuffer, "%0.3f", Device.Meas.MV205_2_I_mA);
+  }
+  else if(!strcmp(UartRxBuffer , "U_MAIN?"))
+  {
+    sprintf(UartTxBuffer, "%0.3f", Device.Meas.U_MAIN);
+  }
+  else if(!strcmp(UartRxBuffer , "MV341_Temp?"))
+  {
+    sprintf(UartTxBuffer, "%0.3f", Device.Meas.MV341_Temp);
+  }
+  else if(!strcmp(UartRxBuffer , "MV205_1_Temp?"))
+  {
+    sprintf(UartTxBuffer, "%0.3f", Device.Meas.MV205_1_Temp);
+  }
+  else if(!strcmp(UartRxBuffer , "MV205_2_Temp?"))
+  {
+    sprintf(UartTxBuffer, "%0.3f", Device.Meas.MV205_2_Temp);
+  }
+  else if(!strcmp(UartRxBuffer , "MV341_WarmUpMs?"))
+  {
+    sprintf(UartTxBuffer, "%ld", Device.Status.MV341_WarmUpMs);
+  }
+  else if(!strcmp(UartRxBuffer , "MV205_1_WarmUpMs?"))
+  {
+    sprintf(UartTxBuffer, "%ld", Device.Status.MV205_1_WarmUpMs);
+  }
+  else if(!strcmp(UartRxBuffer , "MV205_2_WarmUpMs?"))
+  {
+    sprintf(UartTxBuffer, "%ld", Device.Status.MV205_2_WarmUpMs);
+  }
+  else if(!strcmp(UartRxBuffer , "Lock_1?"))
+  {
+    sprintf(UartTxBuffer, "%d", Device.Status.Lock_1);
+  }
+  else if(!strcmp(UartRxBuffer , "Lock_2?"))
+  {
+    sprintf(UartTxBuffer, "%d", Device.Status.Lock_2);
+  }
+  else if(!strcmp(UartRxBuffer , "MV205_1_En?"))
+  {
+    sprintf(UartTxBuffer, "%d", Device.Status.MV205_1_En);
+  }
+  else if(!strcmp(UartRxBuffer , "MV205_2_En?"))
+  {
+    sprintf(UartTxBuffer, "%d", Device.Status.MV205_2_En);
+  }
+  else if(!strcmp(UartRxBuffer , "State?"))
+  {
+    sprintf(UartTxBuffer, "%d", Device.State.Curr);
+  }
+  else if(!strcmp(UartRxBuffer , "Seconds?"))
+  {
+    sprintf(UartTxBuffer, "%ld", Device.Status.Seconds);
+  }
+  else if(!strcmp(UartRxBuffer , "QueryCnt?"))
+  {
+    sprintf(UartTxBuffer, "%ld", Device.Status.QueryCnt);
+    Device.Status.QueryCnt++;
+  }
+  else
+  {
+    sprintf(UartTxBuffer, CMDLINE_UNKNOWN_PARAMETER_ERROR, UartRxBuffer);
+  }
 
-    if(strlen(UartRxBuffer)==0)
-      return;
+  uint8_t resp_len =strlen(UartTxBuffer);
+  UartTxBuffer[resp_len]= '\r';
+  UartTxBuffer[++resp_len]= 0;
 
-    for(uint8_t i=0; i<strlen(UartRxBuffer);i++)
-      if(UartRxBuffer[i]=='\r')
-        UartRxBuffer[i]=0;
-
-    for(uint8_t i=0; i<strlen(UartRxBuffer);i++)
-      if(UartRxBuffer[i]=='\n')
-        UartRxBuffer[i]=0;
-
-
-    if(!strcmp(UartRxBuffer , "*OPC?"))
-    {
-      Device.Status.SuccessParsedCmdCnt++;
-      strcpy(UartTxBuffer, "*OPC");
-    }
-    else if(!strcmp(UartRxBuffer , "MV341_I_mA?"))
-    {
-      sprintf(UartTxBuffer, "%0.3f", Device.Meas.MV205_1_I_mA);
-    }
-    else if(!strcmp(UartRxBuffer , "MV205_1_I_mA?"))
-    {
-      sprintf(UartTxBuffer, "%0.3f", Device.Meas.MV205_1_I_mA);
-    }
-    else if(!strcmp(UartRxBuffer , "MV205_2_I_mA?"))
-    {
-      sprintf(UartTxBuffer, "%0.3f", Device.Meas.MV205_2_I_mA);
-    }
-    else if(!strcmp(UartRxBuffer , "U_MAIN?"))
-    {
-      sprintf(UartTxBuffer, "%0.3f", Device.Meas.U_MAIN);
-    }
-    else if(!strcmp(UartRxBuffer , "MV341_Temp?"))
-    {
-      sprintf(UartTxBuffer, "%0.3f", Device.Meas.MV341_Temp);
-    }
-    else if(!strcmp(UartRxBuffer , "MV205_1_Temp?"))
-    {
-      sprintf(UartTxBuffer, "%0.3f", Device.Meas.MV205_1_Temp);
-    }
-    else if(!strcmp(UartRxBuffer , "MV20  5_2_Temp?"))
-    {
-      sprintf(UartTxBuffer, "%0.3f", Device.Meas.MV205_2_Temp);
-    }
-
-    uint8_t resp_len =strlen(UartTxBuffer);
-    UartTxBuffer[resp_len]= '\r';
-    UartTxBuffer[++resp_len]= 0;
-
-    if(strlen(UartTxBuffer)!=0)
-    {
-      HAL_UART_DMAStop(&huart1);
-      HAL_UART_Transmit(&huart1, (uint8_t*) UartTxBuffer, sizeof(UartTxBuffer), 100);
-      memset(UartTxBuffer,0x00,UART_BUFFER_SIZE);
-      memset(UartRxBuffer,0x00,UART_BUFFER_SIZE);
-      HAL_UART_Receive_DMA(&huart1, (uint8_t*) UartRxBuffer, UART_BUFFER_SIZE);
-    }
+  if(strlen(UartTxBuffer)!=0)
+  {
+    //!!!DeviceDbgLog("Rx:%s, Tx:%s",UartRxBuffer,UartTxBuffer);
+    HAL_UART_Transmit(&huart1, (uint8_t*) UartTxBuffer, sizeof(UartTxBuffer), 100);
+    memset(UartTxBuffer,0x00,UART_BUFFER_SIZE);
+    HAL_UART_Receive_DMA(&huart1, (uint8_t*) UartRxBuffer, UART_BUFFER_SIZE);
   }
 }
 
 /* StateMachineTask -----------------------------------------------------------*/
 void ControlTask(void)
 {
-  static uint32_t timestamp=0;
-/*
-  if(HAL_GetTick() - timestamp > 1000)
-  {
-    timestamp = HAL_GetTick();
-
-    if(HAL_GPIO_ReadPin(LOCK1_GPIO_Port,LOCK1_Pin ) == GPIO_PIN_SET)
-      HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_SET);
-    else
-      HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_RESET);
-
-
-    if(HAL_GPIO_ReadPin(LOCK2_GPIO_Port, LOCK2_Pin ) == GPIO_PIN_SET)
-        HAL_GPIO_WritePin(LED3_GPIO_Port, LED3_Pin, GPIO_PIN_SET);
-      else
-        HAL_GPIO_WritePin(LED3_GPIO_Port, LED3_Pin, GPIO_PIN_RESET);
-  }
-*/
+  static uint32_t timestamp = 0;
 
   switch (Device.State.Curr)
   {
      case SDEV_START:
      {
-
          Device.State.Next = SDEV_WAIT;
          timestamp = HAL_GetTick();
          DeviceDbgLog("ControlTask: SDEV_START -> SDEV_WAIT");
-
        break;
      }
 
      case SDEV_WAIT:
      {
-       if(HAL_GetTick() - timestamp >= 1000 )
+       if((HAL_GetTick() - timestamp) > INTER_STATE_DEALY_MS )
        {
          Device.State.Next = SDEV_IDLE;
          DeviceDbgLog("ControlTask: SDEV_WAIT -> SDEV_IDLE");
        }
-
        break;
      }
 
@@ -321,9 +364,16 @@ void ControlTask(void)
      }
      case SDEV_MV341_WARMING:
      {
-       if(Device.Meas.MV341_I_mA < 300)
+       if(Device.State.Pre != Device.State.Curr)
+       {
+         timestamp = HAL_GetTick();
+         Device.Status.MV341_WarmUpMs = 0;
+       }
+
+       if(Device.Meas.MV341_I_mA < MV341_I_LIMIT_MA)
        {
          Device.State.Next = SDEV_MV341_WARM_CPLT;
+         Device.Status.MV341_WarmUpMs = HAL_GetTick() -  timestamp;
          DeviceDbgLog("ControlTask: SDEV_MV341_WARMING -> SDEV_MV341_WARM_CPLT");
        }
        else
@@ -331,6 +381,7 @@ void ControlTask(void)
          if(DoesExtRefOscEnable())
          {
            DeviceDbgLog("ControlTask.Mode: External ref osc...");
+           Device.Status.MV341_WarmUpMs = 0;
            Device.State.Next = SDEV_MV205_1_WARMING;
            DeviceDbgLog("ControlTask: SDEV_MV341_WARMING -> SDEV_MV205_1_WARMING")
          }
@@ -339,43 +390,85 @@ void ControlTask(void)
      }
      case SDEV_MV341_WARM_CPLT:
      {
-       Device.State.Next = SDEV_MV205_1_WARMING;
-       DeviceDbgLog("ControlTask: SDEV_MV341_WARM_CPLT -> SDEV_MV205_1_WARMING");
+       if(Device.State.Pre != Device.State.Curr)
+       {
+         timestamp = HAL_GetTick();
+         SetMV205_1(ENABLE);
+       }
+
+       if((HAL_GetTick() - timestamp) > INTER_STATE_DEALY_MS)
+       {
+
+         Device.State.Next = SDEV_MV205_1_WARMING;
+         DeviceDbgLog("ControlTask: SDEV_MV341_WARM_CPLT -> SDEV_MV205_1_WARMING");
+       }
        break;
      }
      case SDEV_MV205_1_WARMING:
      {
-       
-       if(Device.Meas.MV205_1_I_mA < 200)
+       if(Device.State.Pre != Device.State.Curr)
+       {
+         timestamp = HAL_GetTick();
+         Device.Status.MV205_1_WarmUpMs = 0;
+       }
+
+       if(Device.Meas.MV205_1_I_mA < MV205_1_I_LIMIT_MA)
        {
          Device.State.Next = SDEV_MV205_1_WARM_CPLT;
+         Device.Status.MV205_1_WarmUpMs = HAL_GetTick() -  timestamp;
          DeviceDbgLog("ControlTask: SDEV_MV341_WARMING -> SDEV_MV205_1_WARM_CPLT");
        }
        break;
      }
      case SDEV_MV205_1_WARM_CPLT:
      {
-       Device.State.Next = SDEV_MV205_2_WARMING;
-       DeviceDbgLog("ControlTask: SDEV_MV205_1_WARM_CPLT -> SDEV_MV205_2_WARMING");
+       if(Device.State.Pre != Device.State.Curr)
+       {
+         SetMV205_2(ENABLE);
+         timestamp = HAL_GetTick();
+         DeviceDbgLog("SDEV_MV205_1_WARM_CPLT.Tick:%ld", HAL_GetTick());
+       }
+
+       if((HAL_GetTick() - timestamp) > INTER_STATE_DEALY_MS)
+       {
+         Device.State.Next = SDEV_MV205_2_WARMING;
+         DeviceDbgLog("ControlTask: SDEV_MV205_1_WARM_CPLT -> SDEV_MV205_2_WARMING");
+       }
+       break;
      }
      case SDEV_MV205_2_WARMING:
      {
-       if(Device.Meas.MV205_2_I_mA < 200)
+       if(Device.State.Pre != Device.State.Curr)
+       {
+         timestamp = HAL_GetTick();
+         Device.Status.MV205_2_WarmUpMs = 0;
+       }
+
+       if(Device.Meas.MV205_2_I_mA < MV205_2_I_LIMIT_MA)
        {
          Device.State.Next = SDEV_MV205_2_WARM_CPLT;
+         Device.Status.MV205_2_WarmUpMs = HAL_GetTick() -  timestamp;
          DeviceDbgLog("ControlTask: SDEV_MV205_2_WARMING -> SDEV_MV205_2_WARM_CPLT");
        }
        break;
      }
      case SDEV_MV205_2_WARM_CPLT:
      {
-       Device.State.Next = SDEV_WARMING_SEQ_CPLT;
-       DeviceDbgLog("ControlTask: SDEV_MV205_2_WARM_CPLT -> SDEV_WARMING_SEQ_CPLT");
+       if(Device.State.Pre != Device.State.Curr)
+       {
+         timestamp = HAL_GetTick();
+       }
+       if((HAL_GetTick() - timestamp) > INTER_STATE_DEALY_MS)
+       {
+         Device.State.Next = SDEV_WARMING_SEQ_CPLT;
+         DeviceDbgLog("ControlTask: SDEV_MV205_2_WARM_CPLT -> SDEV_WARMING_SEQ_CPLT");
+       }
+       break;
      }
 
      case SDEV_WARMING_SEQ_CPLT:
      {
-
+       break;
      }
   }
 
@@ -436,10 +529,10 @@ int main(void)
 #endif
 
   DeviceUsrLog("Manufacturer:%s, Name:%s, Version:%04X",DEVICE_MNF, DEVICE_NAME, DEVICE_FW);
-
   HAL_UART_Receive_DMA (&huart1, (uint8_t*)UartRxBuffer, UART_BUFFER_SIZE);
 
-
+  SetMV205_1(DISABLE);
+  SetMV205_2(DISABLE);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -447,11 +540,46 @@ int main(void)
   while (1)
   {
     static uint32_t timestamp=0;
+    static uint32_t secTimestamp=0;
+
+    Device.Status.MainCycleTime = timestamp;
 
     LiveLedTask(&hLiveLed);
     AcdTask();
     ControlTask();
     UartTask();
+
+    if(HAL_GetTick() - secTimestamp >= 1000){
+      secTimestamp = HAL_GetTick();
+      Device.Status.Seconds++;
+    }
+
+    if(Device.Status.MV205_1_En && Device.Status.MV205_2_En)
+      SetMV205EnLed(ENABLE);
+    else
+      SetMV205EnLed(DISABLE);
+
+    if(GetLock1()==ENABLE)
+    {
+      Device.Status.Lock_1 = 1;
+      SetLock1Led(ENABLE);
+    }
+    else
+    {
+      Device.Status.Lock_1 = 0;
+      SetLock1Led(DISABLE);
+    }
+
+    if(GetLock2()==ENABLE)
+    {
+      Device.Status.Lock_2 = 1;
+      SetLock2Led(ENABLE);
+    }
+    else
+    {
+      Device.Status.Lock_2 = 0;
+      SetLock2Led(DISABLE);
+    }
 
     Device.Status.MainCycleTime = HAL_GetTick() - timestamp;
 
@@ -666,13 +794,13 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, MV205_1_EN_Pin|MV205_2_EN_Pin|LED3_Pin|LED2_Pin
-                          |LED1_Pin|LIVE_LED_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, MV205_1_EN_Pin|MV205_2_EN_Pin|MV205EN_LED_Pin|LOCK2_LED_Pin
+                          |LOCK1_LED_Pin|LIVE_LED_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pins : MV205_1_EN_Pin MV205_2_EN_Pin LED3_Pin LED2_Pin
-                           LED1_Pin LIVE_LED_Pin */
-  GPIO_InitStruct.Pin = MV205_1_EN_Pin|MV205_2_EN_Pin|LED3_Pin|LED2_Pin
-                          |LED1_Pin|LIVE_LED_Pin;
+  /*Configure GPIO pins : MV205_1_EN_Pin MV205_2_EN_Pin MV205EN_LED_Pin LOCK2_LED_Pin
+                           LOCK1_LED_Pin LIVE_LED_Pin */
+  GPIO_InitStruct.Pin = MV205_1_EN_Pin|MV205_2_EN_Pin|MV205EN_LED_Pin|LOCK2_LED_Pin
+                          |LOCK1_LED_Pin|LIVE_LED_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -720,28 +848,79 @@ void LiveLedOff(void)
   HAL_GPIO_WritePin(LIVE_LED_GPIO_Port, LIVE_LED_Pin, GPIO_PIN_RESET);
 }
 
-void ControlBothMv205Enable(void){
-
-  HAL_GPIO_WritePin(MV205_1_EN_GPIO_Port, MV205_1_EN_Pin, GPIO_PIN_RESET);
-  HAL_GPIO_WritePin(MV205_2_EN_GPIO_Port, MV205_2_EN_Pin, GPIO_PIN_RESET);
-}
-
-void ControlMV205_1(uint8_t enable)
+void SetMV205_1(FunctionalState enable)
 {
-  if(enable)
-    HAL_GPIO_WritePin(MV205_1_EN_GPIO_Port, MV205_1_EN_Pin, GPIO_PIN_SET);
-  else
+  if(enable == ENABLE)
+  {
+    Device.Status.MV205_1_En = 1;
     HAL_GPIO_WritePin(MV205_1_EN_GPIO_Port, MV205_1_EN_Pin, GPIO_PIN_RESET);
+  }
+  else
+  {
+    Device.Status.MV205_1_En = 0;
+    HAL_GPIO_WritePin(MV205_1_EN_GPIO_Port, MV205_1_EN_Pin, GPIO_PIN_SET);
+  }
 }
 
-void ControlMV205_2(uint8_t enable)
+void SetMV205_2(FunctionalState enable)
 {
-  if(enable)
-    HAL_GPIO_WritePin(MV205_1_EN_GPIO_Port, MV205_1_EN_Pin, GPIO_PIN_SET);
+  if(enable == ENABLE)
+  {
+    Device.Status.MV205_2_En = 1;
+    HAL_GPIO_WritePin(MV205_2_EN_GPIO_Port, MV205_2_EN_Pin, GPIO_PIN_RESET);
+
+  }
   else
-    HAL_GPIO_WritePin(MV205_1_EN_GPIO_Port, MV205_1_EN_Pin, GPIO_PIN_RESET);
+  {
+    Device.Status.MV205_2_En = 0;
+    HAL_GPIO_WritePin(MV205_2_EN_GPIO_Port, MV205_2_EN_Pin, GPIO_PIN_SET);
+  }
 }
 
+
+FunctionalState GetLock1()
+{
+
+  if( HAL_GPIO_ReadPin(LOCK1_GPIO_Port,LOCK1_Pin) == GPIO_PIN_SET)
+    return ENABLE;
+  else
+    return DISABLE;
+}
+
+FunctionalState GetLock2()
+{
+
+  if( HAL_GPIO_ReadPin(LOCK2_GPIO_Port,LOCK2_Pin) == GPIO_PIN_SET)
+    return ENABLE;
+  else
+    return DISABLE;
+}
+
+
+
+void SetMV205EnLed(FunctionalState enable)
+{
+  if(enable == ENABLE)
+    HAL_GPIO_WritePin(MV205EN_LED_GPIO_Port, MV205EN_LED_Pin, GPIO_PIN_SET);
+  else
+    HAL_GPIO_WritePin(MV205EN_LED_GPIO_Port, MV205EN_LED_Pin, GPIO_PIN_RESET);
+}
+
+void SetLock1Led(FunctionalState enable)
+{
+  if(enable == ENABLE)
+    HAL_GPIO_WritePin(LOCK1_LED_GPIO_Port, LOCK1_LED_Pin, GPIO_PIN_SET);
+  else
+    HAL_GPIO_WritePin(LOCK1_LED_GPIO_Port, LOCK1_LED_Pin, GPIO_PIN_RESET);
+}
+
+void SetLock2Led(FunctionalState enable)
+{
+  if(enable == ENABLE)
+    HAL_GPIO_WritePin(LOCK2_LED_GPIO_Port, LOCK2_LED_Pin, GPIO_PIN_SET);
+  else
+    HAL_GPIO_WritePin(LOCK2_LED_GPIO_Port, LOCK2_LED_Pin, GPIO_PIN_RESET);
+}
 
 uint8_t DoesExtRefOscEnable(){
   uint8_t temp;

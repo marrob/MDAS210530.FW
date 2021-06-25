@@ -48,7 +48,7 @@ extern "C" {
 
 /* Exported macro ------------------------------------------------------------*/
 /* USER CODE BEGIN EM */
- #define DEVICE_DEBUG_LEVEL    3
+ #define DEVICE_DEBUG_LEVEL    0
 
 
 #if (DEVICE_DEBUG_LEVEL > 0)
@@ -112,20 +112,20 @@ void Error_Handler(void);
 #define LOCK2_GPIO_Port GPIOB
 #define LOCK1_Pin GPIO_PIN_13
 #define LOCK1_GPIO_Port GPIOB
-#define LED3_Pin GPIO_PIN_4
-#define LED3_GPIO_Port GPIOB
-#define LED2_Pin GPIO_PIN_5
-#define LED2_GPIO_Port GPIOB
-#define LED1_Pin GPIO_PIN_6
-#define LED1_GPIO_Port GPIOB
+#define MV205EN_LED_Pin GPIO_PIN_4
+#define MV205EN_LED_GPIO_Port GPIOB
+#define LOCK2_LED_Pin GPIO_PIN_5
+#define LOCK2_LED_GPIO_Port GPIOB
+#define LOCK1_LED_Pin GPIO_PIN_6
+#define LOCK1_LED_GPIO_Port GPIOB
 #define LIVE_LED_Pin GPIO_PIN_7
 #define LIVE_LED_GPIO_Port GPIOB
 /* USER CODE BEGIN Private defines */
 
-#define DEVICE_FW           0x200720
-#define DEVICE_NAME         "MBMS200711"
+#define DEVICE_FW           0x210625
+#define DEVICE_NAME         "MDAS210530"
 #define DEVICE_PCB          "V00"
-#define DEVICE_MNF          "KONVOLUCIO BT"
+#define DEVICE_MNF          "COREAUDIO"
 #define DEVICE_NAME_SIZE    32
 #define DEVICE_FW_SIZE      sizeof(DEVICE_FW)
 #define DEVICE_PCB_SIZE     sizeof(DEVICE_PCB)

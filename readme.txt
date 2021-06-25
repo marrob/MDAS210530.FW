@@ -24,3 +24,7 @@ power up szekvencia:
 A homérésékeltének tájkoztató jellegu 
 
 A Lockok csak bemnetek... pozotiv logikában...
+
+- Jó lenne ha lenne 1 LiveLED,2xLOCK led és 2db LED az MV205-nek és 1db tápled
+- Vannak olyan alkatérszek amiket át kell kötni pl az AMP6...
+- Az MV205-ök vezérlése 0-ra akit ezt jelölni kell a kapcsolási rajzon
