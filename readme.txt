@@ -32,3 +32,29 @@ PB7: LiveLED
 PB6: Lock1
 PB5: Lock2
 PB4: MV205_1 & MV205_2 Enabled
+
+
+
+-10MHz bemérése
+- 22.57
+- A 74SN1G04DBVR a 14-ek helyett
+- hurokszűrőben: C78 22uF helyett 10uF és R69: 150K és 510-re cseréltük 
+- BF799-es hiányzott
+- Hangolófeszültség:
+- 22.7592: 2.53
+- 24.576MHz: 2.51V
+
+- R18: 47K-> végtelen nem kell a csillipitás
+- R25: 270OHM -> végtelen
+- R21: 18R0 -> 0R 
+- R16: 270-> végetelen
+- AMP1 ERA SM1+ helyett ERA SM2+
+- R153:10K -> 8.2K 
+- R104: 10K-> 8.2K
+- R52: 10K -> 9.375K  10K||150K
+
+- Forditott kondik voltak
+- A szűrök polaritása
+
+
+
