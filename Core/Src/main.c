@@ -89,7 +89,7 @@ typedef struct _DeviceTypeDef
     uint8_t Lock_2;
     uint8_t MV205_1_En;
     uint8_t MV205_2_En;
-    uint32_t Seconds;
+    uint32_t UpTimeSec;
     uint32_t QueryCnt;
   }Status;
 
@@ -108,13 +108,23 @@ typedef struct _DeviceTypeDef
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define UART_BUFFER_SIZE        40
+#define RS485_BUFFER_SIZE        40
 #define CMDLINE_UNKNOWN_PARAMETER_ERROR    "!UNKNOWN PARAMETER ERROR '%s'"
 #define INTER_STATE_DEALY_MS    5000
 #define MV341_I_LIMIT_MA        300
 #define MV205_1_I_LIMIT_MA      200
 #define MV205_2_I_LIMIT_MA      200
 #define ADC_UPDATE_MS           500
+
+
+#define DAS_DI_LOCK1      (uint8_t) 1<<0
+#define DAS_DI_LOCK2      (uint8_t) 1<<1
+#define DAS_DI_MV205_1    (uint8_t) 1<<2
+#define DAS_DI_MV205_2    (uint8_t) 1<<3
+
+#define DAS_DO_MV205_1_EN (uint8_t) 1<<0
+#define DAS_DO_MV205_2_EN (uint8_t) 1<<1
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -133,9 +143,8 @@ DMA_HandleTypeDef hdma_usart1_rx;
 LiveLED_HnadleTypeDef hLiveLed;
 DeviceTypeDef     Device;
 AdcChannelsTypeDef   AdcChannelsResult;
-char UartRxBuffer[UART_BUFFER_SIZE];
-char UartTxBuffer[UART_BUFFER_SIZE];
-char Receive[UART_BUFFER_SIZE];
+char UartRxBuffer[RS485_BUFFER_SIZE];
+char UartTxBuffer[RS485_BUFFER_SIZE];
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -204,7 +213,7 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 }
 
 /* UART ----------------------------------------------------------------------*/
-
+/*Todo: Ida DMA megaszakitása kellene, ez itt rossz*/
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
   DeviceErrLog("Megtelt");
@@ -296,7 +305,7 @@ void UartTask(void)
   }
   else if(!strcmp(UartRxBuffer , "Seconds?"))
   {
-    sprintf(UartTxBuffer, "%ld", Device.Status.Seconds);
+    sprintf(UartTxBuffer, "%ld", Device.Status.UpTimeSec);
   }
   else if(!strcmp(UartRxBuffer , "QueryCnt?"))
   {
@@ -309,15 +318,15 @@ void UartTask(void)
   }
 
   uint8_t resp_len =strlen(UartTxBuffer);
-  UartTxBuffer[resp_len]= '\r';
+  UartTxBuffer[resp_len]= '\r'; /*Todo:Ezt javisd ki \n-re 2022.02.03*/
   UartTxBuffer[++resp_len]= 0;
 
   if(strlen(UartTxBuffer)!=0)
   {
     //!!!DeviceDbgLog("Rx:%s, Tx:%s",UartRxBuffer,UartTxBuffer);
     HAL_UART_Transmit(&huart1, (uint8_t*) UartTxBuffer, sizeof(UartTxBuffer), 100);
-    memset(UartTxBuffer,0x00,UART_BUFFER_SIZE);
-    HAL_UART_Receive_DMA(&huart1, (uint8_t*) UartRxBuffer, UART_BUFFER_SIZE);
+    memset(UartTxBuffer,0x00,RS485_BUFFER_SIZE);
+    HAL_UART_Receive_DMA(&huart1, (uint8_t*) UartRxBuffer, RS485_BUFFER_SIZE);
   }
 }
 
@@ -529,7 +538,7 @@ int main(void)
 #endif
 
   DeviceUsrLog("Manufacturer:%s, Name:%s, Version:%04X",DEVICE_MNF, DEVICE_NAME, DEVICE_FW);
-  HAL_UART_Receive_DMA (&huart1, (uint8_t*)UartRxBuffer, UART_BUFFER_SIZE);
+  HAL_UART_Receive_DMA (&huart1, (uint8_t*)UartRxBuffer, RS485_BUFFER_SIZE);
 
   SetMV205_1(DISABLE);
   SetMV205_2(DISABLE);
@@ -551,7 +560,7 @@ int main(void)
 
     if(HAL_GetTick() - secTimestamp >= 1000){
       secTimestamp = HAL_GetTick();
-      Device.Status.Seconds++;
+      Device.Status.UpTimeSec++;
     }
 
     if(Device.Status.MV205_1_En && Device.Status.MV205_2_En)
@@ -960,4 +969,3 @@ void assert_failed(uint8_t *file, uint32_t line)
 }
 #endif /* USE_FULL_ASSERT */
 
-/************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
