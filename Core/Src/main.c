@@ -27,6 +27,8 @@
 #include "vt100.h"
 #include "LiveLed.h"
 #include "StringPlus.h"
+#include <stdio.h>
+#include <stdlib.h>
 
 /* USER CODE END Includes */
 
@@ -79,7 +81,6 @@ typedef struct _DeviceTypeDef
   struct _status
   {
     uint32_t AdcUpdatedCnt;
-    uint32_t MainCycleTime;
     uint32_t UartTaskCnt;
     uint32_t SuccessParsedCmdCnt;
     uint32_t MV341_WarmUpMs;
@@ -101,6 +102,28 @@ typedef struct _DeviceTypeDef
   }State;
 
 
+  struct _DasClock
+  {
+    uint8_t DI;
+    uint8_t DO;
+  }DasClock;
+
+  struct _Diag
+  {
+    uint32_t MainCycleTime;
+    uint32_t UartTaskCnt;
+
+    uint32_t RS485ResponseCnt;
+    uint32_t RS485RequestCnt;
+    uint32_t RS485UnknwonCnt;
+    uint32_t RS485NotMyCmdCnt;
+
+    uint32_t UART_Receive_IT_ErrorCounter;
+    uint32_t UartErrorCounter;
+    uint32_t UpTimeSec;
+
+  }Diag;
+
 
 }DeviceTypeDef;
 
@@ -108,22 +131,23 @@ typedef struct _DeviceTypeDef
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define RS485_BUFFER_SIZE        40
-#define CMDLINE_UNKNOWN_PARAMETER_ERROR    "!UNKNOWN PARAMETER ERROR '%s'"
+#define DEVICE_ADDRESS          0x02
+#define RS485_BUFFER_SIZE       40
+
+#define DAS_DI_LOCK1      (uint8_t) 1<<0
+#define DAS_DI_LOCK2      (uint8_t) 1<<1
+#define DAS_DI_MV1        (uint8_t) 1<<2
+#define DAS_DI_MV2        (uint8_t) 1<<3
+
+#define DAS_DO_MV1_EN     (uint8_t) 1<<0
+#define DAS_DO_MV2_EN     (uint8_t) 1<<1
+
 #define INTER_STATE_DEALY_MS    5000
 #define MV341_I_LIMIT_MA        300
 #define MV205_1_I_LIMIT_MA      200
 #define MV205_2_I_LIMIT_MA      200
 #define ADC_UPDATE_MS           500
 
-
-#define DAS_DI_LOCK1      (uint8_t) 1<<0
-#define DAS_DI_LOCK2      (uint8_t) 1<<1
-#define DAS_DI_MV205_1    (uint8_t) 1<<2
-#define DAS_DI_MV205_2    (uint8_t) 1<<3
-
-#define DAS_DO_MV205_1_EN (uint8_t) 1<<0
-#define DAS_DO_MV205_2_EN (uint8_t) 1<<1
 
 /* USER CODE END PD */
 
@@ -133,18 +157,24 @@ typedef struct _DeviceTypeDef
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-ADC_HandleTypeDef hadc1;
+ ADC_HandleTypeDef hadc1;
 DMA_HandleTypeDef hdma_adc1;
 
 UART_HandleTypeDef huart1;
 DMA_HandleTypeDef hdma_usart1_rx;
 
 /* USER CODE BEGIN PV */
+
 LiveLED_HnadleTypeDef hLiveLed;
 DeviceTypeDef     Device;
 AdcChannelsTypeDef   AdcChannelsResult;
+
+
+/*** RS485 ***/
 char UartRxBuffer[RS485_BUFFER_SIZE];
 char UartTxBuffer[RS485_BUFFER_SIZE];
+char        UartCharacter;
+uint8_t     UartRxBufferPtr;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -154,8 +184,12 @@ static void MX_DMA_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_ADC1_Init(void);
 /* USER CODE BEGIN PFP */
+
+/*** LiveLed ***/
 void LiveLedOff(void);
 void LiveLedOn(void);
+
+
 void MV205Enable(void);
 void AcdTask(void);
 void ControlTask(void);
@@ -169,6 +203,21 @@ void SetLock1Led(FunctionalState enable);
 void SetMV205EnLed(FunctionalState enable);
 FunctionalState GetLock2();
 FunctionalState GetLock1();
+
+/*** DASClock ***/
+uint8_t ReadDI(void);
+void WriteDO(uint8_t state);
+
+
+/*** UART/RS485 ***/
+char* RS485Parser(char *line);
+void RS485DirRx(void);
+void RS485DirTx(void);
+void RS485TxTask(void);
+
+
+/*** Tools ***/
+void UpTimeTask(void);
 
 /* USER CODE END PFP */
 
@@ -212,123 +261,140 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 
 }
 
-/* UART ----------------------------------------------------------------------*/
-/*Todo: Ida DMA megaszakitása kellene, ez itt rossz*/
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+/* UART-RS485-----------------------------------------------------------------*/
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *context)
 {
-  DeviceErrLog("Megtelt");
-}
-
-void UartTask(void)
-{
-
-  if(strlen(UartRxBuffer)==0)
-    return;
-
-  uint8_t terminated = 0;
-  for(uint8_t i=0; i<strlen(UartRxBuffer);i++)
-    if(UartRxBuffer[i]=='\r' || UartRxBuffer[i]=='\n')
+  if(HAL_UART_Receive_IT(context, (uint8_t *)&UartCharacter, 1) != HAL_OK)
+    Device.Diag.UART_Receive_IT_ErrorCounter++;
+  else
+  {
+    if(UartCharacter == '\n')
     {
-      UartRxBuffer[i]=0;
-      terminated = 1;
+      UartRxBuffer[UartRxBufferPtr] = '\0';
+      strcpy(UartTxBuffer, RS485Parser(UartRxBuffer));
+      UartRxBufferPtr = 0;
     }
-
-  if(!terminated)
-     return;
-  else
-    HAL_UART_DMAStop(&huart1);
-
-  if(!strcmp(UartRxBuffer , "*OPC?"))
-  {
-    Device.Status.SuccessParsedCmdCnt++;
-    strcpy(UartTxBuffer, "*OPC");
-  }
-  else if(!strcmp(UartRxBuffer , "MV341_I_mA?"))
-  {
-    sprintf(UartTxBuffer, "%0.3f", Device.Meas.MV341_I_mA);
-  }
-  else if(!strcmp(UartRxBuffer , "MV205_1_I_mA?"))
-  {
-    sprintf(UartTxBuffer, "%0.3f", Device.Meas.MV205_1_I_mA);
-  }
-  else if(!strcmp(UartRxBuffer , "MV205_2_I_mA?"))
-  {
-    sprintf(UartTxBuffer, "%0.3f", Device.Meas.MV205_2_I_mA);
-  }
-  else if(!strcmp(UartRxBuffer , "U_MAIN?"))
-  {
-    sprintf(UartTxBuffer, "%0.3f", Device.Meas.U_MAIN);
-  }
-  else if(!strcmp(UartRxBuffer , "MV341_Temp?"))
-  {
-    sprintf(UartTxBuffer, "%0.3f", Device.Meas.MV341_Temp);
-  }
-  else if(!strcmp(UartRxBuffer , "MV205_1_Temp?"))
-  {
-    sprintf(UartTxBuffer, "%0.3f", Device.Meas.MV205_1_Temp);
-  }
-  else if(!strcmp(UartRxBuffer , "MV205_2_Temp?"))
-  {
-    sprintf(UartTxBuffer, "%0.3f", Device.Meas.MV205_2_Temp);
-  }
-  else if(!strcmp(UartRxBuffer , "MV341_WarmUpMs?"))
-  {
-    sprintf(UartTxBuffer, "%ld", Device.Status.MV341_WarmUpMs);
-  }
-  else if(!strcmp(UartRxBuffer , "MV205_1_WarmUpMs?"))
-  {
-    sprintf(UartTxBuffer, "%ld", Device.Status.MV205_1_WarmUpMs);
-  }
-  else if(!strcmp(UartRxBuffer , "MV205_2_WarmUpMs?"))
-  {
-    sprintf(UartTxBuffer, "%ld", Device.Status.MV205_2_WarmUpMs);
-  }
-  else if(!strcmp(UartRxBuffer , "Lock_1?"))
-  {
-    sprintf(UartTxBuffer, "%d", Device.Status.Lock_1);
-  }
-  else if(!strcmp(UartRxBuffer , "Lock_2?"))
-  {
-    sprintf(UartTxBuffer, "%d", Device.Status.Lock_2);
-  }
-  else if(!strcmp(UartRxBuffer , "MV205_1_En?"))
-  {
-    sprintf(UartTxBuffer, "%d", Device.Status.MV205_1_En);
-  }
-  else if(!strcmp(UartRxBuffer , "MV205_2_En?"))
-  {
-    sprintf(UartTxBuffer, "%d", Device.Status.MV205_2_En);
-  }
-  else if(!strcmp(UartRxBuffer , "State?"))
-  {
-    sprintf(UartTxBuffer, "%d", Device.State.Curr);
-  }
-  else if(!strcmp(UartRxBuffer , "Seconds?"))
-  {
-    sprintf(UartTxBuffer, "%ld", Device.Status.UpTimeSec);
-  }
-  else if(!strcmp(UartRxBuffer , "QueryCnt?"))
-  {
-    sprintf(UartTxBuffer, "%ld", Device.Status.QueryCnt);
-    Device.Status.QueryCnt++;
-  }
-  else
-  {
-    sprintf(UartTxBuffer, CMDLINE_UNKNOWN_PARAMETER_ERROR, UartRxBuffer);
-  }
-
-  uint8_t resp_len =strlen(UartTxBuffer);
-  UartTxBuffer[resp_len]= '\r'; /*Todo:Ezt javisd ki \n-re 2022.02.03*/
-  UartTxBuffer[++resp_len]= 0;
-
-  if(strlen(UartTxBuffer)!=0)
-  {
-    //!!!DeviceDbgLog("Rx:%s, Tx:%s",UartRxBuffer,UartTxBuffer);
-    HAL_UART_Transmit(&huart1, (uint8_t*) UartTxBuffer, sizeof(UartTxBuffer), 100);
-    memset(UartTxBuffer,0x00,RS485_BUFFER_SIZE);
-    HAL_UART_Receive_DMA(&huart1, (uint8_t*) UartRxBuffer, RS485_BUFFER_SIZE);
+    else
+      UartRxBuffer[UartRxBufferPtr++] = UartCharacter;
   }
 }
+
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+    Device.Diag.UartErrorCounter++;
+    __HAL_UART_CLEAR_PEFLAG(huart);
+    __HAL_UART_CLEAR_FEFLAG(huart);
+    __HAL_UART_CLEAR_NEFLAG(huart);
+    __HAL_UART_CLEAR_OREFLAG(huart);
+
+  if(HAL_UART_Receive_IT(huart, (uint8_t *)&UartCharacter, 1) != HAL_OK)
+    Device.Diag.UART_Receive_IT_ErrorCounter++;
+}
+
+char* RS485Parser(char *line)
+{
+  char buffer[RS485_BUFFER_SIZE];
+  unsigned int addr = 0;
+  char cmd[20];
+  char arg1[10];
+  char arg2[10];
+  memset(buffer, 0x00, RS485_BUFFER_SIZE);
+  uint8_t params = sscanf(line, "#%x %s %s %s",&addr, cmd, arg1, arg2);
+  if(addr != DEVICE_ADDRESS)
+  {
+    Device.Diag.RS485NotMyCmdCnt++;
+    return NULL;
+  }
+  Device.Diag.RS485RequestCnt++;
+  if(params == 2)
+  {
+    if(!strcmp(cmd, "*OPC?"))
+    {
+      strcpy(buffer, "OK");
+    }
+    else if(!strcmp(cmd, "*RDY?"))
+    {
+      strcpy(buffer, "OK");
+    }
+    else if(!strcmp(cmd, "*WHOIS?"))
+    {
+      sprintf(buffer, "*WHOIS %s", DEVICE_NAME);
+    }
+    else if(!strcmp(cmd, "*VER?"))
+    {
+      sprintf(buffer, "*VER %s", DEVICE_FW);
+    }
+    else if(!strcmp(cmd, "*UID?"))
+    {
+      sprintf(buffer, "*UID %4lX%4lX%4lX",HAL_GetUIDw0(), HAL_GetUIDw1(), HAL_GetUIDw2());
+    }
+    else if(!strcmp(cmd,"UPTIME?"))
+    {
+       sprintf(buffer, "UPTIME %08lX", Device.Diag.UpTimeSec);
+    }
+    else if(!strcmp(cmd,"DI?"))
+    {
+       sprintf(buffer, "DI %02X", Device.DasClock.DI);
+    }
+    else if(!strcmp(cmd,"DO?"))
+    {
+       sprintf(buffer, "DO %02X", Device.DasClock.DO);
+    }
+    else
+    {
+      Device.Diag.RS485UnknwonCnt++;
+    }
+  }
+  if(params == 3)
+  {
+    if(!strcmp(cmd,"DO"))
+    {
+      Device.DasClock.DO = strtol(arg1, NULL, 16);
+      strcpy(buffer, "OK");
+    }
+    else
+    {
+      Device.Diag.RS485UnknwonCnt++;
+    }
+  }
+
+  static char resp[2 * RS485_BUFFER_SIZE];
+  memset(resp, 0x00, RS485_BUFFER_SIZE);
+
+  sprintf(resp, "#%02X %s", DEVICE_ADDRESS, buffer);
+
+  uint8_t length = strlen(resp);
+  resp[length] = '\n';
+  resp[length + 1] = '\0';
+  return resp;
+}
+
+void RS485TxTask(void)
+{
+  uint8_t txn=strlen(UartTxBuffer);
+  if( txn != 0)
+  {
+    Device.Diag.RS485ResponseCnt++;
+    RS485DirTx();
+    DelayMs(10);
+    HAL_UART_Transmit(&huart1, (uint8_t*) UartTxBuffer, txn, 100);
+    UartTxBuffer[0] = 0;
+    RS485DirRx();
+  }
+}
+
+void RS485DirTx(void)
+{
+  HAL_GPIO_WritePin(LOCK1_LED_GPIO_Port, LOCK1_LED_Pin, GPIO_PIN_SET);
+  //HAL_GPIO_WritePin(USART1_DIR_GPIO_Port, USART1_DIR_Pin, GPIO_PIN_SET);
+}
+
+void RS485DirRx(void)
+{
+  HAL_GPIO_WritePin(LOCK1_LED_GPIO_Port, LOCK1_LED_Pin, GPIO_PIN_RESET);
+  //HAL_GPIO_WritePin(USART1_DIR_GPIO_Port, USART1_DIR_Pin, GPIO_PIN_RESET);
+}
+
 
 /* StateMachineTask -----------------------------------------------------------*/
 void ControlTask(void)
@@ -538,30 +604,35 @@ int main(void)
 #endif
 
   DeviceUsrLog("Manufacturer:%s, Name:%s, Version:%04X",DEVICE_MNF, DEVICE_NAME, DEVICE_FW);
-  HAL_UART_Receive_DMA (&huart1, (uint8_t*)UartRxBuffer, RS485_BUFFER_SIZE);
 
+  /*** Clocks ***/
   SetMV205_1(DISABLE);
   SetMV205_2(DISABLE);
+
+
+  /*** RS485 ***/
+  RS485DirRx();
+
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  static uint32_t timestamp;
   while (1)
   {
-    static uint32_t timestamp=0;
-    static uint32_t secTimestamp=0;
-
-    Device.Status.MainCycleTime = timestamp;
+    if(HAL_GetTick() - timestamp > 100)
+    {
+      timestamp = HAL_GetTick();
+     // Device.DasClock.DI = ReadDI();
+     // WriteDO(Device.DasClock.DO);
+    }
 
     LiveLedTask(&hLiveLed);
     AcdTask();
+    UpTimeTask();
     ControlTask();
-    UartTask();
-
-    if(HAL_GetTick() - secTimestamp >= 1000){
-      secTimestamp = HAL_GetTick();
-      Device.Status.UpTimeSec++;
-    }
+    RS485TxTask();
 
     if(Device.Status.MV205_1_En && Device.Status.MV205_2_En)
       SetMV205EnLed(ENABLE);
@@ -589,8 +660,6 @@ int main(void)
       Device.Status.Lock_2 = 0;
       SetLock2Led(DISABLE);
     }
-
-    Device.Status.MainCycleTime = HAL_GetTick() - timestamp;
 
     /* USER CODE END WHILE */
 
@@ -623,6 +692,7 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+
   /** Initializes the CPU, AHB and APB buses clocks
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
@@ -661,6 +731,7 @@ static void MX_ADC1_Init(void)
   /* USER CODE BEGIN ADC1_Init 1 */
 
   /* USER CODE END ADC1_Init 1 */
+
   /** Common config
   */
   hadc1.Instance = ADC1;
@@ -674,6 +745,7 @@ static void MX_ADC1_Init(void)
   {
     Error_Handler();
   }
+
   /** Configure Regular Channel
   */
   sConfig.Channel = ADC_CHANNEL_0;
@@ -683,6 +755,7 @@ static void MX_ADC1_Init(void)
   {
     Error_Handler();
   }
+
   /** Configure Regular Channel
   */
   sConfig.Channel = ADC_CHANNEL_1;
@@ -691,6 +764,7 @@ static void MX_ADC1_Init(void)
   {
     Error_Handler();
   }
+
   /** Configure Regular Channel
   */
   sConfig.Channel = ADC_CHANNEL_2;
@@ -699,6 +773,7 @@ static void MX_ADC1_Init(void)
   {
     Error_Handler();
   }
+
   /** Configure Regular Channel
   */
   sConfig.Channel = ADC_CHANNEL_3;
@@ -707,6 +782,7 @@ static void MX_ADC1_Init(void)
   {
     Error_Handler();
   }
+
   /** Configure Regular Channel
   */
   sConfig.Channel = ADC_CHANNEL_4;
@@ -715,6 +791,7 @@ static void MX_ADC1_Init(void)
   {
     Error_Handler();
   }
+
   /** Configure Regular Channel
   */
   sConfig.Channel = ADC_CHANNEL_5;
@@ -723,6 +800,7 @@ static void MX_ADC1_Init(void)
   {
     Error_Handler();
   }
+
   /** Configure Regular Channel
   */
   sConfig.Channel = ADC_CHANNEL_6;
@@ -753,7 +831,7 @@ static void MX_USART1_UART_Init(void)
 
   /* USER CODE END USART1_Init 1 */
   huart1.Instance = USART1;
-  huart1.Init.BaudRate = 115200;
+  huart1.Init.BaudRate = 230400;
   huart1.Init.WordLength = UART_WORDLENGTH_8B;
   huart1.Init.StopBits = UART_STOPBITS_1;
   huart1.Init.Parity = UART_PARITY_NONE;
@@ -765,7 +843,10 @@ static void MX_USART1_UART_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN USART1_Init 2 */
-
+  if(HAL_UART_Receive_IT(&huart1, (uint8_t *)&UartCharacter, 1) != HAL_OK)
+  {
+    Device.Diag.UART_Receive_IT_ErrorCounter++;
+  }
   /* USER CODE END USART1_Init 2 */
 
 }
@@ -835,7 +916,6 @@ static void MX_GPIO_Init(void)
 }*/
 
 //SWO
-
 int _write(int file, char *ptr, int len)
 {
   int i=0;
@@ -856,6 +936,8 @@ void LiveLedOff(void)
 {
   HAL_GPIO_WritePin(LIVE_LED_GPIO_Port, LIVE_LED_Pin, GPIO_PIN_RESET);
 }
+
+/* DasClock-------------------------------------------------------------------*/
 
 void SetMV205_1(FunctionalState enable)
 {
@@ -917,10 +999,12 @@ void SetMV205EnLed(FunctionalState enable)
 
 void SetLock1Led(FunctionalState enable)
 {
+  /*
   if(enable == ENABLE)
     HAL_GPIO_WritePin(LOCK1_LED_GPIO_Port, LOCK1_LED_Pin, GPIO_PIN_SET);
   else
     HAL_GPIO_WritePin(LOCK1_LED_GPIO_Port, LOCK1_LED_Pin, GPIO_PIN_RESET);
+   */
 }
 
 void SetLock2Led(FunctionalState enable)
@@ -936,6 +1020,55 @@ uint8_t DoesExtRefOscEnable(){
   temp = HAL_GPIO_ReadPin(LOCK2_GPIO_Port, LOCK2_Pin ) == GPIO_PIN_SET;
   return temp;
 }
+
+/* DasClock-------------------------------------------------------------------*/
+uint8_t ReadDI(void)
+{
+  uint8_t state = 0;
+
+  if( HAL_GPIO_ReadPin(LOCK1_GPIO_Port,LOCK1_Pin) == GPIO_PIN_SET)
+    state |= DAS_DI_LOCK1;
+
+  if( HAL_GPIO_ReadPin(LOCK2_GPIO_Port,LOCK2_Pin) == GPIO_PIN_SET)
+    state |= DAS_DI_LOCK2;
+
+  if( HAL_GPIO_ReadPin(LOCK1_GPIO_Port,LOCK1_Pin) == GPIO_PIN_SET)
+    state |= DAS_DI_MV1;
+
+  if(HAL_GPIO_ReadPin(LOCK2_GPIO_Port,LOCK2_Pin) == GPIO_PIN_SET)
+    state |= DAS_DI_MV2;
+
+  return state;
+}
+
+void WriteDO(uint8_t state)
+{
+  if(state & DAS_DO_MV1_EN)
+    HAL_GPIO_WritePin(MV205_1_EN_GPIO_Port, MV205_1_EN_Pin, GPIO_PIN_RESET);
+  else
+    HAL_GPIO_WritePin(MV205_1_EN_GPIO_Port, MV205_1_EN_Pin, GPIO_PIN_SET);
+
+  if(state & DAS_DO_MV2_EN)
+    HAL_GPIO_WritePin(MV205_2_EN_GPIO_Port, MV205_2_EN_Pin, GPIO_PIN_RESET);
+  else
+    HAL_GPIO_WritePin(MV205_2_EN_GPIO_Port, MV205_2_EN_Pin, GPIO_PIN_SET);;
+};
+
+
+
+/* Tools----------------------------------------------------------------------*/
+void UpTimeTask(void)
+{
+  static uint32_t timestamp;
+
+  if(HAL_GetTick() - timestamp > 1000)
+  {
+    timestamp = HAL_GetTick();
+    Device.Diag.UpTimeSec++;
+  }
+}
+
+
 
 
 /* USER CODE END 4 */
@@ -968,4 +1101,3 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
-
