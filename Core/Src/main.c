@@ -130,11 +130,17 @@ typedef struct _DeviceTypeDef
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+
+/*** RS485 ***/
 #define RS485_BUFFER_SIZE   40
 #define RS485_TX_HOLD_MS     1
+#define RS485_CMD_LENGTH    10
+#define RS485_ARG1_LENGTH   10
+#define RS485_ARG2_LENGTH   10
 #define CLIENT_TX_ADDR      0x20
 #define CLIENT_RX_ADDR      0x02
 
+/*** DasClock ***/
 #define DAS_DI_LOCK1      (uint8_t) 1<<0
 #define DAS_DI_LOCK2      (uint8_t) 1<<1
 #define DAS_DI_MV1        (uint8_t) 1<<2
@@ -151,6 +157,7 @@ typedef struct _DeviceTypeDef
 #define DAS_AI_MV205_1_TEMP   5
 #define DAS_AI_MV205_2_TEMP   6
 
+/*** Control ***/
 #define INTER_STATE_DEALY_MS    5000
 #define MV341_I_LIMIT_MA        300
 #define MV205_1_I_LIMIT_MA      200
@@ -248,9 +255,7 @@ void AcdTask(void)
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 {
   Device.Status.AdcUpdatedCnt++;
-
   double lsb = 3.3/4096; //0.000805
-
 
   //pl:  0.050A * 0.1R * x20 = 0.1V
   //Imért = (ADC * LSB) / 20 / 0.1R * 1000mA
@@ -277,7 +282,6 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 
   Device.Meas.MV205_2_Temp = ((AdcChannelsResult.MV205_2_Temp * lsb) - 0.5) * 100;
   Device.DasClock.AI[DAS_AI_MV205_2_TEMP] = Device.Meas.MV205_2_Temp;
-
 
 }
 
@@ -313,12 +317,17 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 
 char* RS485Parser(char *line)
 {
-  char buffer[RS485_BUFFER_SIZE];
   unsigned int addr = 0;
-  char cmd[20];
-  char arg1[10];
-  char arg2[10];
+  char buffer[RS485_BUFFER_SIZE];
+  char cmd[RS485_CMD_LENGTH];
+  char arg1[RS485_ARG1_LENGTH];
+  char arg2[RS485_ARG2_LENGTH];
+
   memset(buffer, 0x00, RS485_BUFFER_SIZE);
+  memset(cmd,0x00, RS485_CMD_LENGTH);
+  memset(arg1,0x00, RS485_ARG1_LENGTH);
+  memset(arg2,0x00, RS485_ARG2_LENGTH);
+
   uint8_t params = sscanf(line, "#%x %s %s %s",&addr, cmd, arg1, arg2);
   if(addr != CLIENT_RX_ADDR)
   {
