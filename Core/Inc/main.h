@@ -124,7 +124,7 @@ void Error_Handler(void);
 
 #define DEVICE_NAME             "MDAS210530"
 #define DEVICE_NAME_SIZE        sizeof(DEVICE_NAME)
-#define DEVICE_FW               "220510_2157"
+#define DEVICE_FW               "220609_2252"
 #define DEVICE_FW_SIZE          sizeof(DEVICE_FW)
 #define DEVICE_PCB              "00"
 #define DEVICE_PCB_SIZE         sizeof(DEVICE_PCB)

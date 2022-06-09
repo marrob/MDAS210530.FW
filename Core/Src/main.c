@@ -46,16 +46,6 @@ typedef struct _AdcChannelsTypeDef{
 }AdcChannelsTypeDef;
 #define ADC_CH_COUNT sizeof(AdcChannelsTypeDef)/sizeof(uint16_t)
 
-typedef struct _MeasurementsTypeDef{
-  double MV341_I_mA;
-  double MV205_1_I_mA;
-  double MV205_2_I_mA;
-  double U_MAIN;
-  double MV341_Temp;
-  double MV205_1_Temp;
-  double MV205_2_Temp;
-}MeasurementsTypeDef;
-
 typedef enum _CtrlStatesTypeDef
 {
   SDEV_START,                   //0
@@ -68,30 +58,10 @@ typedef enum _CtrlStatesTypeDef
   SDEV_MV205_2_WARMING,         //7
   SDEV_MV205_2_WARM_CPLT,       //8
   SDEV_WARMING_SEQ_CPLT,        //9
-
 }CtrlStatesTypeDef;
 
 typedef struct _DeviceTypeDef
 {
-  uint8_t ExtRefOscEnabled;
-  MeasurementsTypeDef Meas;
-
-  struct _status
-  {
-    uint32_t AdcUpdatedCnt;
-    uint32_t UartTaskCnt;
-    uint32_t SuccessParsedCmdCnt;
-    uint32_t MV341_WarmUpMs;
-    uint32_t MV205_1_WarmUpMs;
-    uint32_t MV205_2_WarmUpMs;
-    uint8_t Lock_1;
-    uint8_t Lock_2;
-    uint8_t MV205_1_En;
-    uint8_t MV205_2_En;
-    uint32_t UpTimeSec;
-    uint32_t QueryCnt;
-  }Status;
-
   struct
   {
     CtrlStatesTypeDef Next;
@@ -99,6 +69,16 @@ typedef struct _DeviceTypeDef
     CtrlStatesTypeDef Pre;
   }State;
 
+  struct _Meas
+  {
+    double MV341_I_mA;
+    double MV205_1_I_mA;
+    double MV205_2_I_mA;
+    double U_MAIN;
+    double MV341_Temp;
+    double MV205_1_Temp;
+    double MV205_2_Temp;
+  }Meas;
 
   struct _DasClock
   {
@@ -109,21 +89,21 @@ typedef struct _DeviceTypeDef
 
   struct _Diag
   {
-    uint32_t MainCycleTime;
-    uint32_t UartTaskCnt;
+    uint32_t AdcUpdatedCnt;
+    uint32_t MV341_WarmUpMs;
+    uint32_t MV205_1_WarmUpMs;
+    uint32_t MV205_2_WarmUpMs;
 
     uint32_t RS485ResponseCnt;
     uint32_t RS485RequestCnt;
     uint32_t RS485UnknwonCnt;
     uint32_t RS485NotMyCmdCnt;
 
+    uint32_t UartTaskCnt;
     uint32_t UART_Receive_IT_ErrorCounter;
     uint32_t UartErrorCounter;
     uint32_t UpTimeSec;
-
   }Diag;
-
-
 }DeviceTypeDef;
 
 /* USER CODE END PTD */
@@ -141,13 +121,14 @@ typedef struct _DeviceTypeDef
 #define CLIENT_RX_ADDR      0x02
 
 /*** DasClock ***/
-#define DAS_DI_LOCK1      (uint8_t) 1<<0
-#define DAS_DI_LOCK2      (uint8_t) 1<<1
-#define DAS_DI_MV1        (uint8_t) 1<<2
-#define DAS_DI_MV2        (uint8_t) 1<<3
+#define DAS_DI_LOCK1        (uint8_t) 1<<0
+#define DAS_DI_LOCK2        (uint8_t) 1<<1
+#define DAS_DI_EXT_EN       (uint8_t) 1<<2
+#define DAS_DI_MV1_EN       (uint8_t) 1<<3
+#define DAS_DI_MV2_EN       (uint8_t) 1<<4
 
-#define DAS_DO_MV1_EN     (uint8_t) 1<<0
-#define DAS_DO_MV2_EN     (uint8_t) 1<<1
+#define DAS_DO_MV1_EN       (uint8_t) 1<<0
+#define DAS_DO_MV2_EN       (uint8_t) 1<<1
 
 #define DAS_AI_MV341_I_MA     0
 #define DAS_AI_MV205_1_I_MA   1
@@ -173,18 +154,16 @@ typedef struct _DeviceTypeDef
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
- ADC_HandleTypeDef hadc1;
+ADC_HandleTypeDef hadc1;
 DMA_HandleTypeDef hdma_adc1;
 
 UART_HandleTypeDef huart1;
 DMA_HandleTypeDef hdma_usart1_rx;
 
 /* USER CODE BEGIN PV */
-
 LiveLED_HnadleTypeDef hLiveLed;
 DeviceTypeDef     Device;
 AdcChannelsTypeDef   AdcChannelsResult;
-
 
 /*** RS485 ***/
 char UartRxBuffer[RS485_BUFFER_SIZE];
@@ -204,33 +183,22 @@ static void MX_ADC1_Init(void);
 /*** LiveLed ***/
 void LiveLedOff(void);
 void LiveLedOn(void);
-
-
-void MV205Enable(void);
-void AcdTask(void);
-void ControlTask(void);
-void UartTask(void);
-uint8_t DoesExtRefOscEnable(void);
-void ControlBothMv205Enable(void);
-void SetMV205_1(FunctionalState enable);
-void SetMV205_2(FunctionalState enable);
 void SetLock2Led(FunctionalState enable);
 void SetLock1Led(FunctionalState enable);
 void SetMV205EnLed(FunctionalState enable);
-FunctionalState GetLock2();
-FunctionalState GetLock1();
 
 /*** DASClock ***/
+void AcdTask(void);
+void ControlTask(void);
 uint8_t ReadDI(void);
 void WriteDO(uint8_t state);
 
-
 /*** UART/RS485 ***/
 char* RS485Parser(char *line);
+void UartTask(void);
 void RS485DirRx(void);
 void RS485DirTx(void);
 void RS485TxTask(void);
-
 
 /*** Tools ***/
 void UpTimeTask(void);
@@ -245,16 +213,16 @@ void UpTimeTask(void);
 void AcdTask(void)
 {
   static uint32_t timestamp=0;
-  if(HAL_GetTick() - timestamp > ADC_UPDATE_MS){
+  if(HAL_GetTick() - timestamp > ADC_UPDATE_MS)
+  {
     timestamp = HAL_GetTick();
     HAL_ADC_Start_DMA(&hadc1, (uint32_t*)&AdcChannelsResult, ADC_CH_COUNT);
   }
 }
 
-
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 {
-  Device.Status.AdcUpdatedCnt++;
+  Device.Diag.AdcUpdatedCnt++;
   double lsb = 3.3/4096; //0.000805
 
   //pl:  0.050A * 0.1R * x20 = 0.1V
@@ -282,7 +250,6 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 
   Device.Meas.MV205_2_Temp = ((AdcChannelsResult.MV205_2_Temp * lsb) - 0.5) * 100;
   Device.DasClock.AI[DAS_AI_MV205_2_TEMP] = Device.Meas.MV205_2_Temp;
-
 }
 
 /* UART-RS485-----------------------------------------------------------------*/
@@ -374,24 +341,28 @@ char* RS485Parser(char *line)
       Device.Diag.RS485UnknwonCnt++;
     }
   }
-  if(params == 3)
+  else if(params == 3)
   {
     if(!strcmp(cmd,"DO"))
     {
       Device.DasClock.DO = strtol(arg1, NULL, 16);
       strcpy(buffer, "OK");
     }
-    if(!strcmp(cmd,"AI?"))
+    else if(!strcmp(cmd,"AI?"))
     {
-      uint8_t ch = strtol(arg1, NULL, 10);
-      sprintf(buffer, "AI %d %0.3f", ch, Device.DasClock.AI[ch] );
+       uint8_t ch = strtol(arg1, NULL, 10);
+       if(ch < ADC_CH_COUNT)
+         sprintf(buffer, "AI %d %0.3f", ch, Device.DasClock.AI[ch] );
     }
     else
     {
       Device.Diag.RS485UnknwonCnt++;
     }
   }
-
+  else
+  {
+    Device.Diag.RS485UnknwonCnt++;
+  }
   static char resp[2 * RS485_BUFFER_SIZE];
   memset(resp, 0x00, RS485_BUFFER_SIZE);
 
@@ -441,7 +412,6 @@ void ControlTask(void)
      {
          Device.State.Next = SDEV_WAIT;
          timestamp = HAL_GetTick();
-         DeviceDbgLog("ControlTask: SDEV_START -> SDEV_WAIT");
        break;
      }
 
@@ -450,24 +420,19 @@ void ControlTask(void)
        if((HAL_GetTick() - timestamp) > INTER_STATE_DEALY_MS )
        {
          Device.State.Next = SDEV_IDLE;
-         DeviceDbgLog("ControlTask: SDEV_WAIT -> SDEV_IDLE");
        }
        break;
      }
 
      case SDEV_IDLE:
      {
-       if(DoesExtRefOscEnable())
+       if(Device.DasClock.DI & DAS_DI_EXT_EN)
        {
-         DeviceDbgLog("ControlTask.Mode: External ref osc...");
          Device.State.Next = SDEV_MV205_1_WARMING;
-         DeviceDbgLog("ControlTask: SDEV_IDLE -> SDEV_MV205_1_WARMING");
        }
        else
        {
-         DeviceDbgLog("ControlTask.Mode: Internal ref osc...");
          Device.State.Next = SDEV_MV341_WARMING;
-         DeviceDbgLog("ControlTask: SDEV_IDLE -> SDEV_MV341_WARMING");
        }
        break;
      }
@@ -476,23 +441,20 @@ void ControlTask(void)
        if(Device.State.Pre != Device.State.Curr)
        {
          timestamp = HAL_GetTick();
-         Device.Status.MV341_WarmUpMs = 0;
+         Device.Diag.MV341_WarmUpMs = 0;
        }
 
        if(Device.Meas.MV341_I_mA < MV341_I_LIMIT_MA)
        {
          Device.State.Next = SDEV_MV341_WARM_CPLT;
-         Device.Status.MV341_WarmUpMs = HAL_GetTick() -  timestamp;
-         DeviceDbgLog("ControlTask: SDEV_MV341_WARMING -> SDEV_MV341_WARM_CPLT");
+         Device.Diag.MV341_WarmUpMs = HAL_GetTick() -  timestamp;
        }
        else
        {
-         if(DoesExtRefOscEnable())
+         if(Device.DasClock.DI & DAS_DI_EXT_EN)
          {
-           DeviceDbgLog("ControlTask.Mode: External ref osc...");
-           Device.Status.MV341_WarmUpMs = 0;
+           Device.Diag.MV341_WarmUpMs = 0;
            Device.State.Next = SDEV_MV205_1_WARMING;
-           DeviceDbgLog("ControlTask: SDEV_MV341_WARMING -> SDEV_MV205_1_WARMING")
          }
        }
        break;
@@ -502,14 +464,12 @@ void ControlTask(void)
        if(Device.State.Pre != Device.State.Curr)
        {
          timestamp = HAL_GetTick();
-         SetMV205_1(ENABLE);
+         Device.DasClock.DO |= DAS_DO_MV1_EN;
        }
 
        if((HAL_GetTick() - timestamp) > INTER_STATE_DEALY_MS)
        {
-
          Device.State.Next = SDEV_MV205_1_WARMING;
-         DeviceDbgLog("ControlTask: SDEV_MV341_WARM_CPLT -> SDEV_MV205_1_WARMING");
        }
        break;
      }
@@ -518,14 +478,13 @@ void ControlTask(void)
        if(Device.State.Pre != Device.State.Curr)
        {
          timestamp = HAL_GetTick();
-         Device.Status.MV205_1_WarmUpMs = 0;
+         Device.Diag.MV205_1_WarmUpMs = 0;
        }
 
        if(Device.Meas.MV205_1_I_mA < MV205_1_I_LIMIT_MA)
        {
          Device.State.Next = SDEV_MV205_1_WARM_CPLT;
-         Device.Status.MV205_1_WarmUpMs = HAL_GetTick() -  timestamp;
-         DeviceDbgLog("ControlTask: SDEV_MV341_WARMING -> SDEV_MV205_1_WARM_CPLT");
+         Device.Diag.MV205_1_WarmUpMs = HAL_GetTick() -  timestamp;
        }
        break;
      }
@@ -533,15 +492,12 @@ void ControlTask(void)
      {
        if(Device.State.Pre != Device.State.Curr)
        {
-         SetMV205_2(ENABLE);
+         Device.DasClock.DO |= DAS_DO_MV2_EN;
          timestamp = HAL_GetTick();
-         DeviceDbgLog("SDEV_MV205_1_WARM_CPLT.Tick:%ld", HAL_GetTick());
        }
-
        if((HAL_GetTick() - timestamp) > INTER_STATE_DEALY_MS)
        {
          Device.State.Next = SDEV_MV205_2_WARMING;
-         DeviceDbgLog("ControlTask: SDEV_MV205_1_WARM_CPLT -> SDEV_MV205_2_WARMING");
        }
        break;
      }
@@ -550,14 +506,13 @@ void ControlTask(void)
        if(Device.State.Pre != Device.State.Curr)
        {
          timestamp = HAL_GetTick();
-         Device.Status.MV205_2_WarmUpMs = 0;
+         Device.Diag.MV205_2_WarmUpMs = 0;
        }
 
        if(Device.Meas.MV205_2_I_mA < MV205_2_I_LIMIT_MA)
        {
          Device.State.Next = SDEV_MV205_2_WARM_CPLT;
-         Device.Status.MV205_2_WarmUpMs = HAL_GetTick() -  timestamp;
-         DeviceDbgLog("ControlTask: SDEV_MV205_2_WARMING -> SDEV_MV205_2_WARM_CPLT");
+         Device.Diag.MV205_2_WarmUpMs = HAL_GetTick() -  timestamp;
        }
        break;
      }
@@ -570,11 +525,9 @@ void ControlTask(void)
        if((HAL_GetTick() - timestamp) > INTER_STATE_DEALY_MS)
        {
          Device.State.Next = SDEV_WARMING_SEQ_CPLT;
-         DeviceDbgLog("ControlTask: SDEV_MV205_2_WARM_CPLT -> SDEV_WARMING_SEQ_CPLT");
        }
        break;
      }
-
      case SDEV_WARMING_SEQ_CPLT:
      {
        break;
@@ -625,28 +578,14 @@ int main(void)
   MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
 
-  DelayMs(500);
-
-  printf(VT100_CLEARSCREEN);
-  printf(VT100_CURSORHOME);
-  printf(VT100_ATTR_RESET);
-
-#ifdef DEBUG
-  printf(VT100_ATTR_RED);
-    DeviceUsrLog("This is a DEBUG version.");
-  printf(VT100_ATTR_RESET);
-#endif
-
-  DeviceUsrLog("Manufacturer:%s, Name:%s, Version:%04X",DEVICE_MNF, DEVICE_NAME, DEVICE_FW);
+  DelayMs(250);
 
   /*** Clocks ***/
-  SetMV205_1(DISABLE);
-  SetMV205_2(DISABLE);
-
+  Device.DasClock.DO &= ~(DAS_DO_MV1_EN);
+  Device.DasClock.DO &= ~(DAS_DO_MV2_EN);
 
   /*** RS485 ***/
   RS485DirRx();
-
 
   /* USER CODE END 2 */
 
@@ -658,8 +597,16 @@ int main(void)
     if(HAL_GetTick() - timestamp > 100)
     {
       timestamp = HAL_GetTick();
-     // Device.DasClock.DI = ReadDI();
-     // WriteDO(Device.DasClock.DO);
+      Device.DasClock.DI = ReadDI();
+      WriteDO(Device.DasClock.DO);
+
+      SetMV205EnLed((Device.DasClock.DO & DAS_DO_MV1_EN) && (Device.DasClock.DO & DAS_DO_MV1_EN));
+      SetLock1Led(Device.DasClock.DI & DAS_DI_LOCK1);
+      SetLock2Led(Device.DasClock.DI & DAS_DI_LOCK2);
+      if(Device.DasClock.DO & DAS_DO_MV1_EN)
+        Device.DasClock.DI = DAS_DI_MV1_EN;
+      if(Device.DasClock.DO & DAS_DO_MV2_EN)
+        Device.DasClock.DI = DAS_DI_MV2_EN;
     }
 
     LiveLedTask(&hLiveLed);
@@ -667,33 +614,6 @@ int main(void)
     UpTimeTask();
     ControlTask();
     RS485TxTask();
-
-    if(Device.Status.MV205_1_En && Device.Status.MV205_2_En)
-      SetMV205EnLed(ENABLE);
-    else
-      SetMV205EnLed(DISABLE);
-
-    if(GetLock1()==ENABLE)
-    {
-      Device.Status.Lock_1 = 1;
-      SetLock1Led(ENABLE);
-    }
-    else
-    {
-      Device.Status.Lock_1 = 0;
-      SetLock1Led(DISABLE);
-    }
-
-    if(GetLock2()==ENABLE)
-    {
-      Device.Status.Lock_2 = 1;
-      SetLock2Led(ENABLE);
-    }
-    else
-    {
-      Device.Status.Lock_2 = 0;
-      SetLock2Led(DISABLE);
-    }
 
     /* USER CODE END WHILE */
 
@@ -940,27 +860,7 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
-/* printf -------------------------------------------------------------------*/
-
-//UART
-/*int _write(int file, char *ptr, int len)
-{
-  HAL_UART_Transmit(&huart1, (uint8_t*)ptr, len, 100);
-  return len;
-}*/
-
-//SWO
-int _write(int file, char *ptr, int len)
-{
-  int i=0;
-  for(i=0 ; i<len ; i++)
-    ITM_SendChar((*ptr++));
-  return len;
-}
-
-
-
-/* LEDs ---------------------------------------------------------------------*/
+/* LiveLed -------------------------------------------------------------------*/
 void LiveLedOn(void)
 {
   HAL_GPIO_WritePin(LIVE_LED_GPIO_Port, LIVE_LED_Pin, GPIO_PIN_SET);
@@ -972,57 +872,6 @@ void LiveLedOff(void)
 }
 
 /* DasClock-------------------------------------------------------------------*/
-
-void SetMV205_1(FunctionalState enable)
-{
-  if(enable == ENABLE)
-  {
-    Device.Status.MV205_1_En = 1;
-    HAL_GPIO_WritePin(MV205_1_EN_GPIO_Port, MV205_1_EN_Pin, GPIO_PIN_RESET);
-  }
-  else
-  {
-    Device.Status.MV205_1_En = 0;
-    HAL_GPIO_WritePin(MV205_1_EN_GPIO_Port, MV205_1_EN_Pin, GPIO_PIN_SET);
-  }
-}
-
-void SetMV205_2(FunctionalState enable)
-{
-  if(enable == ENABLE)
-  {
-    Device.Status.MV205_2_En = 1;
-    HAL_GPIO_WritePin(MV205_2_EN_GPIO_Port, MV205_2_EN_Pin, GPIO_PIN_RESET);
-
-  }
-  else
-  {
-    Device.Status.MV205_2_En = 0;
-    HAL_GPIO_WritePin(MV205_2_EN_GPIO_Port, MV205_2_EN_Pin, GPIO_PIN_SET);
-  }
-}
-
-
-FunctionalState GetLock1()
-{
-
-  if( HAL_GPIO_ReadPin(LOCK1_GPIO_Port,LOCK1_Pin) == GPIO_PIN_SET)
-    return ENABLE;
-  else
-    return DISABLE;
-}
-
-FunctionalState GetLock2()
-{
-
-  if( HAL_GPIO_ReadPin(LOCK2_GPIO_Port,LOCK2_Pin) == GPIO_PIN_SET)
-    return ENABLE;
-  else
-    return DISABLE;
-}
-
-
-
 void SetMV205EnLed(FunctionalState enable)
 {
   if(enable == ENABLE)
@@ -1049,13 +898,6 @@ void SetLock2Led(FunctionalState enable)
     HAL_GPIO_WritePin(LOCK2_LED_GPIO_Port, LOCK2_LED_Pin, GPIO_PIN_RESET);
 }
 
-uint8_t DoesExtRefOscEnable(){
-  uint8_t temp;
-  temp = HAL_GPIO_ReadPin(LOCK2_GPIO_Port, LOCK2_Pin ) == GPIO_PIN_SET;
-  return temp;
-}
-
-/* DasClock-------------------------------------------------------------------*/
 uint8_t ReadDI(void)
 {
   uint8_t state = 0;
@@ -1066,11 +908,8 @@ uint8_t ReadDI(void)
   if( HAL_GPIO_ReadPin(LOCK2_GPIO_Port,LOCK2_Pin) == GPIO_PIN_SET)
     state |= DAS_DI_LOCK2;
 
-  if( HAL_GPIO_ReadPin(LOCK1_GPIO_Port,LOCK1_Pin) == GPIO_PIN_SET)
-    state |= DAS_DI_MV1;
-
-  if(HAL_GPIO_ReadPin(LOCK2_GPIO_Port,LOCK2_Pin) == GPIO_PIN_SET)
-    state |= DAS_DI_MV2;
+  if(HAL_GPIO_ReadPin(INT_EXT_GPIO_Port, INT_EXT_Pin ) == GPIO_PIN_SET)
+    state |= DAS_DI_EXT_EN;
 
   return state;
 }
@@ -1085,10 +924,8 @@ void WriteDO(uint8_t state)
   if(state & DAS_DO_MV2_EN)
     HAL_GPIO_WritePin(MV205_2_EN_GPIO_Port, MV205_2_EN_Pin, GPIO_PIN_RESET);
   else
-    HAL_GPIO_WritePin(MV205_2_EN_GPIO_Port, MV205_2_EN_Pin, GPIO_PIN_SET);;
+    HAL_GPIO_WritePin(MV205_2_EN_GPIO_Port, MV205_2_EN_Pin, GPIO_PIN_SET);
 };
-
-
 
 /* Tools----------------------------------------------------------------------*/
 void UpTimeTask(void)
@@ -1101,9 +938,6 @@ void UpTimeTask(void)
     Device.Diag.UpTimeSec++;
   }
 }
-
-
-
 
 /* USER CODE END 4 */
 
