@@ -43,7 +43,6 @@ typedef struct _AdcChannelsTypeDef{
   uint16_t MV341_Temp;
   uint16_t MV205_1_Temp;
   uint16_t MV205_2_Temp;
-  //uint16_t Vref;
 }AdcChannelsTypeDef;
 #define ADC_CH_COUNT sizeof(AdcChannelsTypeDef)/sizeof(uint16_t)
 
@@ -55,7 +54,6 @@ typedef struct _MeasurementsTypeDef{
   double MV341_Temp;
   double MV205_1_Temp;
   double MV205_2_Temp;
-  double Vref;
 }MeasurementsTypeDef;
 
 typedef enum _CtrlStatesTypeDef
@@ -106,6 +104,7 @@ typedef struct _DeviceTypeDef
   {
     uint8_t DI;
     uint8_t DO;
+    double  AI[ADC_CH_COUNT];
   }DasClock;
 
   struct _Diag
@@ -131,8 +130,10 @@ typedef struct _DeviceTypeDef
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define DEVICE_ADDRESS          0x02
-#define RS485_BUFFER_SIZE       40
+#define RS485_BUFFER_SIZE   40
+#define RS485_TX_HOLD_MS     1
+#define CLIENT_TX_ADDR      0x20
+#define CLIENT_RX_ADDR      0x02
 
 #define DAS_DI_LOCK1      (uint8_t) 1<<0
 #define DAS_DI_LOCK2      (uint8_t) 1<<1
@@ -141,6 +142,14 @@ typedef struct _DeviceTypeDef
 
 #define DAS_DO_MV1_EN     (uint8_t) 1<<0
 #define DAS_DO_MV2_EN     (uint8_t) 1<<1
+
+#define DAS_AI_MV341_I_MA     0
+#define DAS_AI_MV205_1_I_MA   1
+#define DAS_AI_MV205_2_I_MA   2
+#define DAS_AI_U_MAIN         3
+#define DAS_AI_MV341_TEMP     4
+#define DAS_AI_MV205_1_TEMP   5
+#define DAS_AI_MV205_2_TEMP   6
 
 #define INTER_STATE_DEALY_MS    5000
 #define MV341_I_LIMIT_MA        300
@@ -242,22 +251,33 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 
   double lsb = 3.3/4096; //0.000805
 
-  //Ha a táp 10V, akkor R229 és R228 között 1.31V-mérhető... Uin=9.55V és 9.21V-ot jelez
-  Device.Meas.U_MAIN = AdcChannelsResult.U_MAIN * lsb* 1 / (2.4/(15 + 2.4));
 
   //pl:  0.050A * 0.1R * x20 = 0.1V
   //Imért = (ADC * LSB) / 20 / 0.1R * 1000mA
   Device.Meas.MV341_I_mA = (AdcChannelsResult.MV341_I * lsb) / 20 / 0.1 * 1000;
+  Device.DasClock.AI[DAS_AI_MV341_I_MA] = Device.Meas.MV341_I_mA;
+
   Device.Meas.MV205_1_I_mA = (AdcChannelsResult.MV205_1_I * lsb) / 20 / 0.1 * 1000;
+  Device.DasClock.AI[DAS_AI_MV205_1_I_MA] = Device.Meas.MV205_1_I_mA;
+
   Device.Meas.MV205_2_I_mA = (AdcChannelsResult.MV205_2_I * lsb) / 20 / 0.1 * 1000;
+  Device.DasClock.AI[DAS_AI_MV205_2_I_MA] = Device.Meas.MV205_2_I_mA;
+
+  //Ha a táp 10V, akkor R229 és R228 között 1.31V-mérhető... Uin=9.55V és 9.21V-ot jelez
+  Device.Meas.U_MAIN = AdcChannelsResult.U_MAIN * lsb* 1 / (2.4/(15 + 2.4));
+  Device.DasClock.AI[DAS_AI_U_MAIN] = Device.Meas.U_MAIN;
 
   //0C = 0.5
   //10fok változás = 0.1V változás
   Device.Meas.MV341_Temp = ((AdcChannelsResult.MV341_Temp * lsb) - 0.5) * 100;
-  Device.Meas.MV205_1_Temp = ((AdcChannelsResult.MV205_1_Temp * lsb) - 0.5) * 100;
-  Device.Meas.MV205_2_Temp = ((AdcChannelsResult.MV205_2_Temp * lsb) - 0.5) * 100;
+  Device.DasClock.AI[DAS_AI_MV341_TEMP] = Device.Meas.MV341_Temp;
 
-  //Device.Meas.Vref = AdcChannelsResult.Vref * lsb;
+  Device.Meas.MV205_1_Temp = ((AdcChannelsResult.MV205_1_Temp * lsb) - 0.5) * 100;
+  Device.DasClock.AI[DAS_AI_MV205_1_TEMP] = Device.Meas.MV205_1_Temp;
+
+  Device.Meas.MV205_2_Temp = ((AdcChannelsResult.MV205_2_Temp * lsb) - 0.5) * 100;
+  Device.DasClock.AI[DAS_AI_MV205_2_TEMP] = Device.Meas.MV205_2_Temp;
+
 
 }
 
@@ -300,7 +320,7 @@ char* RS485Parser(char *line)
   char arg2[10];
   memset(buffer, 0x00, RS485_BUFFER_SIZE);
   uint8_t params = sscanf(line, "#%x %s %s %s",&addr, cmd, arg1, arg2);
-  if(addr != DEVICE_ADDRESS)
+  if(addr != CLIENT_RX_ADDR)
   {
     Device.Diag.RS485NotMyCmdCnt++;
     return NULL;
@@ -352,6 +372,11 @@ char* RS485Parser(char *line)
       Device.DasClock.DO = strtol(arg1, NULL, 16);
       strcpy(buffer, "OK");
     }
+    if(!strcmp(cmd,"AI?"))
+    {
+      uint8_t ch = strtol(arg1, NULL, 10);
+      sprintf(buffer, "AI %d %0.3f", ch, Device.DasClock.AI[ch] );
+    }
     else
     {
       Device.Diag.RS485UnknwonCnt++;
@@ -361,7 +386,7 @@ char* RS485Parser(char *line)
   static char resp[2 * RS485_BUFFER_SIZE];
   memset(resp, 0x00, RS485_BUFFER_SIZE);
 
-  sprintf(resp, "#%02X %s", DEVICE_ADDRESS, buffer);
+  sprintf(resp, "#%02X %s", CLIENT_TX_ADDR, buffer);
 
   uint8_t length = strlen(resp);
   resp[length] = '\n';
@@ -376,7 +401,7 @@ void RS485TxTask(void)
   {
     Device.Diag.RS485ResponseCnt++;
     RS485DirTx();
-    DelayMs(10);
+    DelayMs(RS485_TX_HOLD_MS);
     HAL_UART_Transmit(&huart1, (uint8_t*) UartTxBuffer, txn, 100);
     UartTxBuffer[0] = 0;
     RS485DirRx();
