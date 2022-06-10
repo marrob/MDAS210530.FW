@@ -123,9 +123,9 @@ typedef struct _DeviceTypeDef
 /*** DasClock ***/
 #define DAS_DI_LOCK1        (uint8_t) 1<<0
 #define DAS_DI_LOCK2        (uint8_t) 1<<1
-#define DAS_DI_EXT_EN       (uint8_t) 1<<2
-#define DAS_DI_MV1_EN       (uint8_t) 1<<3
-#define DAS_DI_MV2_EN       (uint8_t) 1<<4
+#define DAS_DI_EXT_IS_EN    (uint8_t) 1<<2
+#define DAS_DI_MV1_IS_EN    (uint8_t) 1<<3
+#define DAS_DI_MV2_IS_EN    (uint8_t) 1<<4
 
 #define DAS_DO_MV1_EN       (uint8_t) 1<<0
 #define DAS_DO_MV2_EN       (uint8_t) 1<<1
@@ -426,7 +426,7 @@ void ControlTask(void)
 
      case SDEV_IDLE:
      {
-       if(Device.DasClock.DI & DAS_DI_EXT_EN)
+       if(Device.DasClock.DI & DAS_DI_EXT_IS_EN)
        {
          Device.State.Next = SDEV_MV205_1_WARMING;
        }
@@ -451,7 +451,7 @@ void ControlTask(void)
        }
        else
        {
-         if(Device.DasClock.DI & DAS_DI_EXT_EN)
+         if(Device.DasClock.DI & DAS_DI_EXT_IS_EN)
          {
            Device.Diag.MV341_WarmUpMs = 0;
            Device.State.Next = SDEV_MV205_1_WARMING;
@@ -604,9 +604,9 @@ int main(void)
       SetLock1Led(Device.DasClock.DI & DAS_DI_LOCK1);
       SetLock2Led(Device.DasClock.DI & DAS_DI_LOCK2);
       if(Device.DasClock.DO & DAS_DO_MV1_EN)
-        Device.DasClock.DI = DAS_DI_MV1_EN;
+        Device.DasClock.DI |= DAS_DI_MV1_IS_EN;
       if(Device.DasClock.DO & DAS_DO_MV2_EN)
-        Device.DasClock.DI = DAS_DI_MV2_EN;
+        Device.DasClock.DI |= DAS_DI_MV2_IS_EN;
     }
 
     LiveLedTask(&hLiveLed);
@@ -909,7 +909,7 @@ uint8_t ReadDI(void)
     state |= DAS_DI_LOCK2;
 
   if(HAL_GPIO_ReadPin(INT_EXT_GPIO_Port, INT_EXT_Pin ) == GPIO_PIN_SET)
-    state |= DAS_DI_EXT_EN;
+    state |= DAS_DI_EXT_IS_EN;
 
   return state;
 }
