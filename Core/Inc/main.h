@@ -122,18 +122,17 @@ void Error_Handler(void);
 #define LIVE_LED_GPIO_Port GPIOB
 /* USER CODE BEGIN Private defines */
 
+#define DEVICE_OK           0
+#define DEVICE_FAIL         1
+
 #define DEVICE_NAME             "MDAS210530"
 #define DEVICE_NAME_SIZE        sizeof(DEVICE_NAME)
 #define DEVICE_FW               "220609_2252"
 #define DEVICE_FW_SIZE          sizeof(DEVICE_FW)
-#define DEVICE_PCB              "00"
+#define DEVICE_PCB              "V00"
 #define DEVICE_PCB_SIZE         sizeof(DEVICE_PCB)
 #define DEVICE_MNF              "github.com/marrob"
 #define DEVICE_MNF_SIZE         sizeof(DEVICE_MNF)
-
-#define DEVICE_OK           0
-#define DEVICE_FAIL         1
-
 
 /* USER CODE END Private defines */
 

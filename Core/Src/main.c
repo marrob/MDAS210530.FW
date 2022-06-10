@@ -112,23 +112,25 @@ typedef struct _DeviceTypeDef
 /* USER CODE BEGIN PD */
 
 /*** RS485 ***/
-#define RS485_BUFFER_SIZE   40
-#define RS485_TX_HOLD_MS     1
-#define RS485_CMD_LENGTH    10
-#define RS485_ARG1_LENGTH   10
-#define RS485_ARG2_LENGTH   10
-#define CLIENT_TX_ADDR      0x20
-#define CLIENT_RX_ADDR      0x02
+#define RS485_BUFFER_SIZE     40
+#define RS485_TX_HOLD_MS      1
+#define RS485_CMD_LENGTH      35
+#define RS485_ARG1_LENGTH     35
+#define RS485_ARG2_LENGTH     35
+
+/*** Address ***/
+#define CLIENT_TX_ADDR        0x20
+#define CLIENT_RX_ADDR        0x02
 
 /*** DasClock ***/
-#define DAS_DI_LOCK1        (uint8_t) 1<<0
-#define DAS_DI_LOCK2        (uint8_t) 1<<1
-#define DAS_DI_EXT_IS_EN    (uint8_t) 1<<2
-#define DAS_DI_MV1_IS_EN    (uint8_t) 1<<3
-#define DAS_DI_MV2_IS_EN    (uint8_t) 1<<4
+#define DAS_DI_LOCK1          (uint8_t) 1<<0
+#define DAS_DI_LOCK2          (uint8_t) 1<<1
+#define DAS_DI_EXT_IS_EN      (uint8_t) 1<<2
+#define DAS_DI_MV1_IS_EN      (uint8_t) 1<<3
+#define DAS_DI_MV2_IS_EN      (uint8_t) 1<<4
 
-#define DAS_DO_MV1_EN       (uint8_t) 1<<0
-#define DAS_DO_MV2_EN       (uint8_t) 1<<1
+#define DAS_DO_MV1_EN         (uint8_t) 1<<0
+#define DAS_DO_MV2_EN         (uint8_t) 1<<1
 
 #define DAS_AI_MV341_I_MA     0
 #define DAS_AI_MV205_1_I_MA   1
@@ -139,12 +141,11 @@ typedef struct _DeviceTypeDef
 #define DAS_AI_MV205_2_TEMP   6
 
 /*** Control ***/
-#define INTER_STATE_DEALY_MS    5000
-#define MV341_I_LIMIT_MA        300
-#define MV205_1_I_LIMIT_MA      200
-#define MV205_2_I_LIMIT_MA      200
-#define ADC_UPDATE_MS           500
-
+#define INTER_STATE_DEALY_MS  5000
+#define MV341_I_LIMIT_MA      300
+#define MV205_1_I_LIMIT_MA    200
+#define MV205_2_I_LIMIT_MA    200
+#define ADC_UPDATE_MS         500
 
 /* USER CODE END PD */
 
@@ -166,10 +167,10 @@ DeviceTypeDef     Device;
 AdcChannelsTypeDef   AdcChannelsResult;
 
 /*** RS485 ***/
-char UartRxBuffer[RS485_BUFFER_SIZE];
-char UartTxBuffer[RS485_BUFFER_SIZE];
-char        UartCharacter;
-uint8_t     UartRxBufferPtr;
+char    UartRxBuffer[RS485_BUFFER_SIZE];
+char    UartTxBuffer[RS485_BUFFER_SIZE];
+char    UartCharacter;
+uint8_t UartRxBufferPtr;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -305,41 +306,21 @@ char* RS485Parser(char *line)
   if(params == 2)
   {
     if(!strcmp(cmd, "*OPC?"))
-    {
       strcpy(buffer, "OK");
-    }
-    else if(!strcmp(cmd, "*RDY?"))
-    {
-      strcpy(buffer, "OK");
-    }
-    else if(!strcmp(cmd, "*WHOIS?"))
-    {
-      sprintf(buffer, "*WHOIS %s", DEVICE_NAME);
-    }
-    else if(!strcmp(cmd, "*VER?"))
-    {
-      sprintf(buffer, "*VER %s", DEVICE_FW);
-    }
-    else if(!strcmp(cmd, "*UID?"))
-    {
-      sprintf(buffer, "*UID %4lX%4lX%4lX",HAL_GetUIDw0(), HAL_GetUIDw1(), HAL_GetUIDw2());
-    }
+    else if(!strcmp(cmd, "FW?"))
+      sprintf(buffer, "FW %s", DEVICE_FW);
+    else if(!strcmp(cmd, "UID?"))
+      sprintf(buffer, "UID %4lX%4lX%4lX",HAL_GetUIDw0(), HAL_GetUIDw1(), HAL_GetUIDw2());
+    else if(!strcmp(cmd, "PCB?"))
+      sprintf(buffer, "PCB %s", DEVICE_PCB);
     else if(!strcmp(cmd,"UPTIME?"))
-    {
        sprintf(buffer, "UPTIME %08lX", Device.Diag.UpTimeSec);
-    }
     else if(!strcmp(cmd,"DI?"))
-    {
        sprintf(buffer, "DI %02X", Device.DasClock.DI);
-    }
     else if(!strcmp(cmd,"DO?"))
-    {
        sprintf(buffer, "DO %02X", Device.DasClock.DO);
-    }
     else
-    {
       Device.Diag.RS485UnknwonCnt++;
-    }
   }
   else if(params == 3)
   {
@@ -355,19 +336,15 @@ char* RS485Parser(char *line)
          sprintf(buffer, "AI %d %0.3f", ch, Device.DasClock.AI[ch] );
     }
     else
-    {
       Device.Diag.RS485UnknwonCnt++;
-    }
   }
   else
   {
     Device.Diag.RS485UnknwonCnt++;
   }
-  static char resp[2 * RS485_BUFFER_SIZE];
+  static char resp[RS485_BUFFER_SIZE + 5];
   memset(resp, 0x00, RS485_BUFFER_SIZE);
-
   sprintf(resp, "#%02X %s", CLIENT_TX_ADDR, buffer);
-
   uint8_t length = strlen(resp);
   resp[length] = '\n';
   resp[length + 1] = '\0';
