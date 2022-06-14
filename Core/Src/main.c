@@ -71,13 +71,13 @@ typedef struct _DeviceTypeDef
 
   struct _Meas
   {
-    double MV341_I_mA;
-    double MV205_1_I_mA;
-    double MV205_2_I_mA;
-    double U_MAIN;
-    double MV341_Temp;
-    double MV205_1_Temp;
-    double MV205_2_Temp;
+    float MV341_I_mA;
+    float MV205_1_I_mA;
+    float MV205_2_I_mA;
+    float U_MAIN;
+    float MV341_Temp;
+    float MV205_1_Temp;
+    float MV205_2_Temp;
   }Meas;
 
   struct _DasClock
