@@ -82,9 +82,9 @@ typedef struct _DeviceTypeDef
 
   struct _DasClock
   {
-    uint8_t DI;
-    uint8_t DO;
-    double  AI[ADC_CH_COUNT];
+    uint32_t DI;
+    uint32_t DO;
+    float  AI[ADC_CH_COUNT];
   }DasClock;
 
   struct _Diag
@@ -123,14 +123,14 @@ typedef struct _DeviceTypeDef
 #define CLIENT_RX_ADDR        0x02
 
 /*** DasClock ***/
-#define DAS_DI_LOCK1          ((uint8_t) 1<<0)
-#define DAS_DI_LOCK2          ((uint8_t) 1<<1)
-#define DAS_DI_EXT_IS_EN      ((uint8_t) 1<<2)
-#define DAS_DI_MV1_IS_EN      ((uint8_t) 1<<3)
-#define DAS_DI_MV2_IS_EN      ((uint8_t) 1<<4)
+#define DAS_DI_LOCK1          ((uint32_t) 1<<0)
+#define DAS_DI_LOCK2          ((uint32_t) 1<<1)
+#define DAS_DI_EXT_IS_EN      ((uint32_t) 1<<2)
+#define DAS_DI_MV1_IS_EN      ((uint32_t) 1<<3)
+#define DAS_DI_MV2_IS_EN      ((uint32_t) 1<<4)
 
-#define DAS_DO_MV1_EN         ((uint8_t) 1<<0)
-#define DAS_DO_MV2_EN         ((uint8_t) 1<<1)
+#define DAS_DO_MV1_EN         ((uint32_t) 1<<0)
+#define DAS_DO_MV2_EN         ((uint32_t) 1<<1)
 
 #define DAS_AI_MV341_I_MA     0
 #define DAS_AI_MV205_1_I_MA   1
@@ -316,9 +316,9 @@ char* RS485Parser(char *line)
     else if(!strcmp(cmd,"UPTIME?"))
        sprintf(buffer, "UPTIME %08lX", Device.Diag.UpTimeSec);
     else if(!strcmp(cmd,"DI?"))
-       sprintf(buffer, "DI %02X", Device.DasClock.DI);
+       sprintf(buffer, "DI %08lX", Device.DasClock.DI);
     else if(!strcmp(cmd,"DO?"))
-       sprintf(buffer, "DO %02X", Device.DasClock.DO);
+       sprintf(buffer, "DO %08lX", Device.DasClock.DO);
     else
       Device.Diag.RS485UnknwonCnt++;
   }
