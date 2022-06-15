@@ -123,14 +123,14 @@ typedef struct _DeviceTypeDef
 #define CLIENT_RX_ADDR        0x02
 
 /*** DasClock ***/
-#define DAS_DI_LOCK1          (uint8_t) 1<<0
-#define DAS_DI_LOCK2          (uint8_t) 1<<1
-#define DAS_DI_EXT_IS_EN      (uint8_t) 1<<2
-#define DAS_DI_MV1_IS_EN      (uint8_t) 1<<3
-#define DAS_DI_MV2_IS_EN      (uint8_t) 1<<4
+#define DAS_DI_LOCK1          ((uint8_t) 1<<0)
+#define DAS_DI_LOCK2          ((uint8_t) 1<<1)
+#define DAS_DI_EXT_IS_EN      ((uint8_t) 1<<2)
+#define DAS_DI_MV1_IS_EN      ((uint8_t) 1<<3)
+#define DAS_DI_MV2_IS_EN      ((uint8_t) 1<<4)
 
-#define DAS_DO_MV1_EN         (uint8_t) 1<<0
-#define DAS_DO_MV2_EN         (uint8_t) 1<<1
+#define DAS_DO_MV1_EN         ((uint8_t) 1<<0)
+#define DAS_DO_MV2_EN         ((uint8_t) 1<<1)
 
 #define DAS_AI_MV341_I_MA     0
 #define DAS_AI_MV205_1_I_MA   1
@@ -273,11 +273,11 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *context)
 
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 {
-    Device.Diag.UartErrorCounter++;
-    __HAL_UART_CLEAR_PEFLAG(huart);
-    __HAL_UART_CLEAR_FEFLAG(huart);
-    __HAL_UART_CLEAR_NEFLAG(huart);
-    __HAL_UART_CLEAR_OREFLAG(huart);
+  Device.Diag.UartErrorCounter++;
+  __HAL_UART_CLEAR_PEFLAG(huart);
+  __HAL_UART_CLEAR_FEFLAG(huart);
+  __HAL_UART_CLEAR_NEFLAG(huart);
+  __HAL_UART_CLEAR_OREFLAG(huart);
 
   if(HAL_UART_Receive_IT(huart, (uint8_t *)&UartCharacter, 1) != HAL_OK)
     Device.Diag.UART_Receive_IT_ErrorCounter++;
