@@ -155,7 +155,7 @@ typedef struct _DeviceTypeDef
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-ADC_HandleTypeDef hadc1;
+ ADC_HandleTypeDef hadc1;
 DMA_HandleTypeDef hdma_adc1;
 
 UART_HandleTypeDef huart1;
@@ -169,8 +169,8 @@ AdcChannelsTypeDef   AdcChannelsResult;
 /*** RS485 ***/
 char    UartRxBuffer[RS485_BUFFER_SIZE];
 char    UartTxBuffer[RS485_BUFFER_SIZE];
-char    UartCharacter;
-uint8_t UartRxBufferPtr;
+volatile char    UartCharacter;
+volatile uint8_t UartRxBufferPtr;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -333,7 +333,12 @@ char* RS485Parser(char *line)
     {
        uint8_t ch = strtol(arg1, NULL, 10);
        if(ch < ADC_CH_COUNT)
-         sprintf(buffer, "AI %d %0.3f", ch, Device.DasClock.AI[ch] );
+         if(Device.DasClock.AI[ch] < 200)
+           sprintf(buffer, "AI %d %0.3f", ch, Device.DasClock.AI[ch] );
+         else
+           sprintf(buffer, "AI !too long number");
+       else
+         sprintf(buffer, "AI !invalid channel");
     }
     else
       Device.Diag.RS485UnknwonCnt++;
