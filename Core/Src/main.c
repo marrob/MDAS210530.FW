@@ -159,12 +159,13 @@ typedef struct _DeviceTypeDef
 DMA_HandleTypeDef hdma_adc1;
 
 UART_HandleTypeDef huart1;
-DMA_HandleTypeDef hdma_usart1_rx;
 
 /* USER CODE BEGIN PV */
 LiveLED_HnadleTypeDef hLiveLed;
 DeviceTypeDef     Device;
-AdcChannelsTypeDef   AdcChannelsResult;
+
+/*** ADC ***/
+volatile AdcChannelsTypeDef AdcChannelsResult;
 
 /*** RS485 ***/
 char    UartRxBuffer[RS485_BUFFER_SIZE];
@@ -260,14 +261,22 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *context)
     Device.Diag.UART_Receive_IT_ErrorCounter++;
   else
   {
-    if(UartCharacter == '\n')
+    if(UartRxBufferPtr < RS485_BUFFER_SIZE - 1)
     {
-      UartRxBuffer[UartRxBufferPtr] = '\0';
-      strcpy(UartTxBuffer, RS485Parser(UartRxBuffer));
-      UartRxBufferPtr = 0;
+      if(UartCharacter == '\n')
+      {
+        UartRxBuffer[UartRxBufferPtr] = '\0';
+        strcpy(UartTxBuffer, RS485Parser(UartRxBuffer));
+        UartRxBufferPtr = 0;
+      }
+      else
+        UartRxBuffer[UartRxBufferPtr++] = UartCharacter;
     }
     else
-      UartRxBuffer[UartRxBufferPtr++] = UartCharacter;
+    {
+      UartRxBufferPtr = 0;
+      memset(UartRxBuffer,0x00, RS485_BUFFER_SIZE);
+    }
   }
 }
 
@@ -798,11 +807,8 @@ static void MX_DMA_Init(void)
 
   /* DMA interrupt init */
   /* DMA1_Channel1_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
+  HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 10, 0);
   HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
-  /* DMA1_Channel5_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA1_Channel5_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(DMA1_Channel5_IRQn);
 
 }
 
