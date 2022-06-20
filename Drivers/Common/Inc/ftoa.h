@@ -7,8 +7,8 @@
  */
 
 /* Define to prevent recursive inclusion -------------------------------------*/
-#ifndef INC_FOTA_H_
-#define INC_FOTA_H_
+#ifndef INC_FTOA_H_
+#define INC_FTOA_H_
 /* Includes ------------------------------------------------------------------*/
 /* Exported types ------------------------------------------------------------*/
 /* Exported constants --------------------------------------------------------*/
@@ -17,6 +17,6 @@
 /* Exported functions ------------------------------------------------------- */
 void ftoa(float n, char* res, int afterpoint);
 
-#endif /* INC_FOTA_H_ */
+#endif /* INC_FTOA_H_ */
 
 /************************ (C) COPYRIGHT KonvolucioBt ***********END OF FILE****/
