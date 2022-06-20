@@ -101,7 +101,6 @@ typedef struct _DeviceTypeDef
     uint32_t RS485NotMyCmdCnt;
 
     uint32_t UartTaskCnt;
-    uint32_t UART_Receive_IT_ErrorCounter;
     uint32_t UartErrorCounter;
     uint32_t UpTimeSec;
   }Diag;
@@ -264,7 +263,7 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *context)
 {
   if(HAL_UART_Receive_IT(context, (uint8_t *)&UartCharacter, 1) != HAL_OK)
-    Device.Diag.UART_Receive_IT_ErrorCounter++;
+    Device.Diag.UartTaskCnt++;
   else
   {
     if(UartRxBufferPtr < RS485_BUFFER_SIZE - 1)
@@ -295,7 +294,7 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
   __HAL_UART_CLEAR_OREFLAG(huart);
 
   if(HAL_UART_Receive_IT(huart, (uint8_t *)&UartCharacter, 1) != HAL_OK)
-    Device.Diag.UART_Receive_IT_ErrorCounter++;
+    Device.Diag.UartErrorCounter++;
 }
 
 char* RS485Parser(char *line)
@@ -594,8 +593,6 @@ int main(void)
     //ToDo
   }
 
-
-
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -604,7 +601,6 @@ int main(void)
   while (1)
   {
     HAL_WWDG_Refresh(&hwwdg);
-
     if(HAL_GetTick() - timestamp > 100)
     {
       timestamp = HAL_GetTick();
@@ -809,9 +805,7 @@ static void MX_USART1_UART_Init(void)
   }
   /* USER CODE BEGIN USART1_Init 2 */
   if(HAL_UART_Receive_IT(&huart1, (uint8_t *)&UartCharacter, 1) != HAL_OK)
-  {
-    Device.Diag.UART_Receive_IT_ErrorCounter++;
-  }
+    Device.Diag.UartTaskCnt++;
   /* USER CODE END USART1_Init 2 */
 
 }
