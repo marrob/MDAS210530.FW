@@ -29,6 +29,7 @@
 #include "StringPlus.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include "ftoa.h"
 
 /* USER CODE END Includes */
 
@@ -160,6 +161,8 @@ DMA_HandleTypeDef hdma_adc1;
 
 UART_HandleTypeDef huart1;
 
+WWDG_HandleTypeDef hwwdg;
+
 /* USER CODE BEGIN PV */
 LiveLED_HnadleTypeDef hLiveLed;
 DeviceTypeDef     Device;
@@ -180,6 +183,7 @@ static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_ADC1_Init(void);
+static void MX_WWDG_Init(void);
 /* USER CODE BEGIN PFP */
 
 /*** LiveLed ***/
@@ -340,14 +344,17 @@ char* RS485Parser(char *line)
     }
     else if(!strcmp(cmd,"AI?"))
     {
-       uint8_t ch = strtol(arg1, NULL, 10);
-       if(ch < ADC_CH_COUNT)
-         if(Device.DasClock.AI[ch] < 200)
-           sprintf(buffer, "AI %d %0.3f", ch, Device.DasClock.AI[ch] );
-         else
-           sprintf(buffer, "AI !too long number");
-       else
-         sprintf(buffer, "AI !invalid channel");
+      uint8_t ch = strtol(arg1, NULL, 10);
+      if(ch < ADC_CH_COUNT)
+      {
+        char fstr[20];
+        ftoa(Device.DasClock.AI[ch], fstr, 2);
+        sprintf(buffer, "AI %d %s", ch, fstr );
+      }
+      else
+      {
+        sprintf(buffer, "AI !invalid channel");
+      }
     }
     else
       Device.Diag.RS485UnknwonCnt++;
@@ -567,9 +574,8 @@ int main(void)
   MX_DMA_Init();
   MX_USART1_UART_Init();
   MX_ADC1_Init();
+  MX_WWDG_Init();
   /* USER CODE BEGIN 2 */
-
-  DelayMs(250);
 
   /*** Clocks ***/
   Device.DasClock.DO &= ~(DAS_DO_MV1_EN);
@@ -578,6 +584,14 @@ int main(void)
   /*** RS485 ***/
   RS485DirRx();
 
+  /*** Check if the system has resumed from WWDG reset ***/
+  if (__HAL_RCC_GET_FLAG(RCC_FLAG_WWDGRST) != RESET)
+  {
+    //ToDo
+  }
+
+
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -585,6 +599,8 @@ int main(void)
   static uint32_t timestamp;
   while (1)
   {
+    HAL_WWDG_Refresh(&hwwdg);
+
     if(HAL_GetTick() - timestamp > 100)
     {
       timestamp = HAL_GetTick();
@@ -793,6 +809,36 @@ static void MX_USART1_UART_Init(void)
     Device.Diag.UART_Receive_IT_ErrorCounter++;
   }
   /* USER CODE END USART1_Init 2 */
+
+}
+
+/**
+  * @brief WWDG Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_WWDG_Init(void)
+{
+
+  /* USER CODE BEGIN WWDG_Init 0 */
+
+  /* USER CODE END WWDG_Init 0 */
+
+  /* USER CODE BEGIN WWDG_Init 1 */
+
+  /* USER CODE END WWDG_Init 1 */
+  hwwdg.Instance = WWDG;
+  hwwdg.Init.Prescaler = WWDG_PRESCALER_8;
+  hwwdg.Init.Window = 127;
+  hwwdg.Init.Counter = 127;
+  hwwdg.Init.EWIMode = WWDG_EWI_DISABLE;
+  if (HAL_WWDG_Init(&hwwdg) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN WWDG_Init 2 */
+
+  /* USER CODE END WWDG_Init 2 */
 
 }
 
