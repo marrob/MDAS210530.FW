@@ -148,6 +148,9 @@ typedef struct _DeviceTypeDef
 #define MV205_2_I_LIMIT_MA    200
 #define ADC_UPDATE_MS         500
 
+/*** ADC ***/
+#define ADC_LSB               (3.3/4096)
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -229,32 +232,31 @@ void AcdTask(void)
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
 {
   Device.Diag.AdcUpdatedCnt++;
-  double lsb = 3.3/4096; //0.000805
 
   //pl:  0.050A * 0.1R * x20 = 0.1V
   //Imért = (ADC * LSB) / 20 / 0.1R * 1000mA
-  Device.Meas.MV341_I_mA = (AdcChannelsResult.MV341_I * lsb) / 20 / 0.1 * 1000;
+  Device.Meas.MV341_I_mA = (AdcChannelsResult.MV341_I * ADC_LSB) / 20 / 0.1 * 1000;
   Device.DasClock.AI[DAS_AI_MV341_I_MA] = Device.Meas.MV341_I_mA;
 
-  Device.Meas.MV205_1_I_mA = (AdcChannelsResult.MV205_1_I * lsb) / 20 / 0.1 * 1000;
+  Device.Meas.MV205_1_I_mA = (AdcChannelsResult.MV205_1_I * ADC_LSB) / 20 / 0.1 * 1000;
   Device.DasClock.AI[DAS_AI_MV205_1_I_MA] = Device.Meas.MV205_1_I_mA;
 
-  Device.Meas.MV205_2_I_mA = (AdcChannelsResult.MV205_2_I * lsb) / 20 / 0.1 * 1000;
+  Device.Meas.MV205_2_I_mA = (AdcChannelsResult.MV205_2_I * ADC_LSB) / 20 / 0.1 * 1000;
   Device.DasClock.AI[DAS_AI_MV205_2_I_MA] = Device.Meas.MV205_2_I_mA;
 
   //Ha a táp 10V, akkor R229 és R228 között 1.31V-mérhető... Uin=9.55V és 9.21V-ot jelez
-  Device.Meas.U_MAIN = AdcChannelsResult.U_MAIN * lsb* 1 / (2.4/(15 + 2.4));
+  Device.Meas.U_MAIN = AdcChannelsResult.U_MAIN * ADC_LSB * 1 / (2.4/(15 + 2.4));
   Device.DasClock.AI[DAS_AI_U_MAIN] = Device.Meas.U_MAIN;
 
   //0C = 0.5
   //10fok változás = 0.1V változás
-  Device.Meas.MV341_Temp = ((AdcChannelsResult.MV341_Temp * lsb) - 0.5) * 100;
+  Device.Meas.MV341_Temp = ((AdcChannelsResult.MV341_Temp * ADC_LSB) - 0.5) * 100;
   Device.DasClock.AI[DAS_AI_MV341_TEMP] = Device.Meas.MV341_Temp;
 
-  Device.Meas.MV205_1_Temp = ((AdcChannelsResult.MV205_1_Temp * lsb) - 0.5) * 100;
+  Device.Meas.MV205_1_Temp = ((AdcChannelsResult.MV205_1_Temp * ADC_LSB) - 0.5) * 100;
   Device.DasClock.AI[DAS_AI_MV205_1_TEMP] = Device.Meas.MV205_1_Temp;
 
-  Device.Meas.MV205_2_Temp = ((AdcChannelsResult.MV205_2_Temp * lsb) - 0.5) * 100;
+  Device.Meas.MV205_2_Temp = ((AdcChannelsResult.MV205_2_Temp * ADC_LSB) - 0.5) * 100;
   Device.DasClock.AI[DAS_AI_MV205_2_TEMP] = Device.Meas.MV205_2_Temp;
 }
 
@@ -332,6 +334,8 @@ char* RS485Parser(char *line)
        sprintf(buffer, "DI %08lX", Device.DasClock.DI);
     else if(!strcmp(cmd,"DO?"))
        sprintf(buffer, "DO %08lX", Device.DasClock.DO);
+    else if(!strcmp(cmd,"UE?"))
+      sprintf(buffer, "UE %08lX", Device.Diag.UartErrorCounter);
     else
       Device.Diag.RS485UnknwonCnt++;
   }
