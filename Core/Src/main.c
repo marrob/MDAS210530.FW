@@ -29,22 +29,12 @@
 #include "StringPlus.h"
 #include <stdio.h>
 #include <stdlib.h>
-
+#include <math.h>
+#include "fota.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-
-typedef struct _AdcChannelsTypeDef{
-  uint16_t MV341_I;
-  uint16_t MV205_1_I;
-  uint16_t MV205_2_I;
-  uint16_t U_MAIN;
-  uint16_t MV341_Temp;
-  uint16_t MV205_1_Temp;
-  uint16_t MV205_2_Temp;
-}AdcChannelsTypeDef;
-#define ADC_CH_COUNT sizeof(AdcChannelsTypeDef)/sizeof(uint16_t)
 
 typedef enum _CtrlStatesTypeDef
 {
@@ -69,27 +59,18 @@ typedef struct _DeviceTypeDef
     CtrlStatesTypeDef Pre;
   }State;
 
-  struct _Meas
-  {
-    float MV341_I_mA;
-    float MV205_1_I_mA;
-    float MV205_2_I_mA;
-    float U_MAIN;
-    float MV341_Temp;
-    float MV205_1_Temp;
-    float MV205_2_Temp;
-  }Meas;
-
   struct _DasClock
   {
     uint32_t DI;
     uint32_t DO;
-    float  AI[ADC_CH_COUNT];
+    uint32_t UpTimeSec;
   }DasClock;
 
   struct _Diag
   {
     uint32_t AdcUpdatedCnt;
+    uint32_t AdcErrorCnt;
+
     uint32_t MV341_WarmUpMs;
     uint32_t MV205_1_WarmUpMs;
     uint32_t MV205_2_WarmUpMs;
@@ -102,9 +83,19 @@ typedef struct _DeviceTypeDef
     uint32_t UartTaskCnt;
     uint32_t UART_Receive_IT_ErrorCounter;
     uint32_t UartErrorCounter;
-    uint32_t UpTimeSec;
+
   }Diag;
 }DeviceTypeDef;
+
+typedef struct _AdcChannel
+{
+  uint32_t Channel;
+  uint16_t Lsb;
+  float  Result;
+}AdcChannel_t;
+
+
+
 
 /* USER CODE END PTD */
 
@@ -145,8 +136,11 @@ typedef struct _DeviceTypeDef
 #define MV341_I_LIMIT_MA      300
 #define MV205_1_I_LIMIT_MA    200
 #define MV205_2_I_LIMIT_MA    200
-#define ADC_UPDATE_MS         500
+#define ADC_UPDATE_MS         100
 
+
+
+#define ADC_LSB  3.3/4096
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -156,7 +150,6 @@ typedef struct _DeviceTypeDef
 
 /* Private variables ---------------------------------------------------------*/
  ADC_HandleTypeDef hadc1;
-DMA_HandleTypeDef hdma_adc1;
 
 UART_HandleTypeDef huart1;
 
@@ -164,20 +157,32 @@ UART_HandleTypeDef huart1;
 LiveLED_HnadleTypeDef hLiveLed;
 DeviceTypeDef     Device;
 
-/*** ADC ***/
-volatile AdcChannelsTypeDef AdcChannelsResult;
 
 /*** RS485 ***/
 char    UartRxBuffer[RS485_BUFFER_SIZE];
 char    UartTxBuffer[RS485_BUFFER_SIZE];
-volatile char    UartCharacter;
-volatile uint8_t UartRxBufferPtr;
+__IO char    UartCharacter;
+__IO uint8_t UartRxBufferPtr;
+
+/*** ADC ***/
+AdcChannel_t Meas[] =
+{
+    { ADC_CHANNEL_0, 0, 0}, //DAS_AI_MV341_I_MA
+    { ADC_CHANNEL_1, 0, 0}, //DAS_AI_MV205_1_I_MA
+    { ADC_CHANNEL_2, 0, 0}, //DAS_AI_MV205_2_I_MA
+    { ADC_CHANNEL_3, 0, 0}, //DAS_AI_U_MAIN
+    { ADC_CHANNEL_4, 0, 0}, //DAS_AI_MV341_TEMP
+    { ADC_CHANNEL_5, 0, 0}, //DAS_AI_MV205_1_TEMP
+    { ADC_CHANNEL_6, 0, 0}, //DAS_AI_MV205_2_TEMP
+};
+
+#define ADC_CH_COUNT  sizeof(Meas)/sizeof(AdcChannel_t)
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_DMA_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_ADC1_Init(void);
 /* USER CODE BEGIN PFP */
@@ -205,6 +210,8 @@ void RS485TxTask(void);
 /*** Tools ***/
 void UpTimeTask(void);
 
+/*** ADC ***/
+HAL_StatusTypeDef AdcPollChannel(uint32_t ch, uint16_t *result);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -215,44 +222,58 @@ void UpTimeTask(void);
 void AcdTask(void)
 {
   static uint32_t timestamp=0;
+  static uint8_t index = 0;
+
   if(HAL_GetTick() - timestamp > ADC_UPDATE_MS)
   {
+    Device.Diag.AdcUpdatedCnt++;
+
     timestamp = HAL_GetTick();
-    HAL_ADC_Start_DMA(&hadc1, (uint32_t*)&AdcChannelsResult, ADC_CH_COUNT);
+
+    if(AdcPollChannel(Meas[index].Channel, &Meas[index].Lsb) != HAL_OK)
+      Device.Diag.AdcErrorCnt++;
+
+    if (index < 6)
+      index ++;
+    else
+      index = 0;
+
+    //pl:  0.050A * 0.1R * x20 = 0.1V
+    //Imért = (ADC * LSB) / 20 / 0.1R * 1000mA
+    Meas[DAS_AI_MV341_I_MA].Result = (Meas[DAS_AI_MV341_I_MA].Lsb * ADC_LSB) / 20 / 0.1 * 1000;
+    Meas[DAS_AI_MV205_1_I_MA].Result = (Meas[DAS_AI_MV205_1_I_MA].Lsb * ADC_LSB) / 20 / 0.1 * 1000;
+    Meas[DAS_AI_MV205_2_I_MA].Result = (Meas[DAS_AI_MV205_2_I_MA].Lsb * ADC_LSB) / 20 / 0.1 * 1000;
+
+    //Ha a táp 10V, akkor R229 és R228 között 1.31V-mérhető... Uin=9.55V és 9.21V-ot jelez
+    Meas[DAS_AI_U_MAIN].Result = Meas[DAS_AI_U_MAIN].Lsb * ADC_LSB* 1 / (2.4/(15 + 2.4));
+
+    //0C = 0.5
+    //10fok változás = 0.1V változás
+    Meas[DAS_AI_MV341_TEMP].Result = ((Meas[DAS_AI_MV341_TEMP].Lsb * ADC_LSB) - 0.5) * 100;
+    Meas[DAS_AI_MV205_1_TEMP].Result = ((Meas[DAS_AI_MV205_1_TEMP].Lsb * ADC_LSB) - 0.5) * 100;
+    Meas[DAS_AI_MV205_2_TEMP].Result  = ((Meas[DAS_AI_MV205_2_TEMP].Lsb * ADC_LSB) - 0.5) * 100;
   }
 }
 
-void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
+HAL_StatusTypeDef AdcPollChannel(uint32_t ch, uint16_t *result)
 {
-  Device.Diag.AdcUpdatedCnt++;
-  double lsb = 3.3/4096; //0.000805
-
-  //pl:  0.050A * 0.1R * x20 = 0.1V
-  //Imért = (ADC * LSB) / 20 / 0.1R * 1000mA
-  Device.Meas.MV341_I_mA = (AdcChannelsResult.MV341_I * lsb) / 20 / 0.1 * 1000;
-  Device.DasClock.AI[DAS_AI_MV341_I_MA] = Device.Meas.MV341_I_mA;
-
-  Device.Meas.MV205_1_I_mA = (AdcChannelsResult.MV205_1_I * lsb) / 20 / 0.1 * 1000;
-  Device.DasClock.AI[DAS_AI_MV205_1_I_MA] = Device.Meas.MV205_1_I_mA;
-
-  Device.Meas.MV205_2_I_mA = (AdcChannelsResult.MV205_2_I * lsb) / 20 / 0.1 * 1000;
-  Device.DasClock.AI[DAS_AI_MV205_2_I_MA] = Device.Meas.MV205_2_I_mA;
-
-  //Ha a táp 10V, akkor R229 és R228 között 1.31V-mérhető... Uin=9.55V és 9.21V-ot jelez
-  Device.Meas.U_MAIN = AdcChannelsResult.U_MAIN * lsb* 1 / (2.4/(15 + 2.4));
-  Device.DasClock.AI[DAS_AI_U_MAIN] = Device.Meas.U_MAIN;
-
-  //0C = 0.5
-  //10fok változás = 0.1V változás
-  Device.Meas.MV341_Temp = ((AdcChannelsResult.MV341_Temp * lsb) - 0.5) * 100;
-  Device.DasClock.AI[DAS_AI_MV341_TEMP] = Device.Meas.MV341_Temp;
-
-  Device.Meas.MV205_1_Temp = ((AdcChannelsResult.MV205_1_Temp * lsb) - 0.5) * 100;
-  Device.DasClock.AI[DAS_AI_MV205_1_TEMP] = Device.Meas.MV205_1_Temp;
-
-  Device.Meas.MV205_2_Temp = ((AdcChannelsResult.MV205_2_Temp * lsb) - 0.5) * 100;
-  Device.DasClock.AI[DAS_AI_MV205_2_TEMP] = Device.Meas.MV205_2_Temp;
+  HAL_StatusTypeDef status;
+  ADC_ChannelConfTypeDef sConfig = {0};
+  sConfig.Channel =  ch;;
+  sConfig.Rank = ADC_REGULAR_RANK_1;
+  sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
+  if ((status = HAL_ADC_ConfigChannel(&hadc1, &sConfig)) != HAL_OK)
+    return status;
+  if((status = HAL_ADC_Start(&hadc1)) != HAL_OK)
+    return status;
+  if((HAL_ADC_PollForConversion(&hadc1, 100)) != HAL_OK)
+    return status;
+  *result = HAL_ADC_GetValue(&hadc1);
+  if((status = HAL_ADC_Stop(&hadc1)) != HAL_OK)
+    return status;
+  return HAL_OK;
 }
+
 
 /* UART-RS485-----------------------------------------------------------------*/
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *context)
@@ -292,6 +313,7 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
     Device.Diag.UART_Receive_IT_ErrorCounter++;
 }
 
+//char valuestr[20];
 char* RS485Parser(char *line)
 {
   unsigned int addr = 0;
@@ -323,7 +345,7 @@ char* RS485Parser(char *line)
     else if(!strcmp(cmd, "PCB?"))
       sprintf(buffer, "PCB %s", DEVICE_PCB);
     else if(!strcmp(cmd,"UPTIME?"))
-       sprintf(buffer, "UPTIME %08lX", Device.Diag.UpTimeSec);
+       sprintf(buffer, "UPTIME %08lX", Device.DasClock.UpTimeSec);
     else if(!strcmp(cmd,"DI?"))
        sprintf(buffer, "DI %08lX", Device.DasClock.DI);
     else if(!strcmp(cmd,"DO?"))
@@ -340,14 +362,17 @@ char* RS485Parser(char *line)
     }
     else if(!strcmp(cmd,"AI?"))
     {
-       uint8_t ch = strtol(arg1, NULL, 10);
-       if(ch < ADC_CH_COUNT)
-         if(Device.DasClock.AI[ch] < 200)
-           sprintf(buffer, "AI %d %0.3f", ch, Device.DasClock.AI[ch] );
-         else
-           sprintf(buffer, "AI !too long number");
-       else
-         sprintf(buffer, "AI !invalid channel");
+      uint8_t ch = strtol(arg1, NULL, 10);
+      if(ch < ADC_CH_COUNT)
+      {
+        char fstr[20];
+        ftoa(Meas[ch].Result, fstr, 2);
+        sprintf(buffer, "AI %d %s", ch, fstr );
+      }
+      else
+      {
+        sprintf(buffer, "AI !invalid channel");
+      }
     }
     else
       Device.Diag.RS485UnknwonCnt++;
@@ -435,7 +460,7 @@ void ControlTask(void)
          Device.Diag.MV341_WarmUpMs = 0;
        }
 
-       if(Device.Meas.MV341_I_mA < MV341_I_LIMIT_MA)
+       if(Meas[DAS_AI_MV341_I_MA].Result < MV341_I_LIMIT_MA)
        {
          Device.State.Next = SDEV_MV341_WARM_CPLT;
          Device.Diag.MV341_WarmUpMs = HAL_GetTick() -  timestamp;
@@ -472,7 +497,7 @@ void ControlTask(void)
          Device.Diag.MV205_1_WarmUpMs = 0;
        }
 
-       if(Device.Meas.MV205_1_I_mA < MV205_1_I_LIMIT_MA)
+       if(Meas[DAS_AI_MV205_1_I_MA].Result < MV205_1_I_LIMIT_MA)
        {
          Device.State.Next = SDEV_MV205_1_WARM_CPLT;
          Device.Diag.MV205_1_WarmUpMs = HAL_GetTick() -  timestamp;
@@ -500,7 +525,7 @@ void ControlTask(void)
          Device.Diag.MV205_2_WarmUpMs = 0;
        }
 
-       if(Device.Meas.MV205_2_I_mA < MV205_2_I_LIMIT_MA)
+       if(Meas[DAS_AI_MV205_2_I_MA].Result < MV205_2_I_LIMIT_MA)
        {
          Device.State.Next = SDEV_MV205_2_WARM_CPLT;
          Device.Diag.MV205_2_WarmUpMs = HAL_GetTick() -  timestamp;
@@ -528,6 +553,9 @@ void ControlTask(void)
   Device.State.Pre = Device.State.Curr;
   Device.State.Curr = Device.State.Next;
 }
+
+
+
 
 
 /* USER CODE END 0 */
@@ -564,7 +592,6 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_DMA_Init();
   MX_USART1_UART_Init();
   MX_ADC1_Init();
   /* USER CODE BEGIN 2 */
@@ -680,12 +707,12 @@ static void MX_ADC1_Init(void)
   /** Common config
   */
   hadc1.Instance = ADC1;
-  hadc1.Init.ScanConvMode = ADC_SCAN_ENABLE;
+  hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
   hadc1.Init.ContinuousConvMode = DISABLE;
   hadc1.Init.DiscontinuousConvMode = DISABLE;
   hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
   hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
-  hadc1.Init.NbrOfConversion = 7;
+  hadc1.Init.NbrOfConversion = 1;
   if (HAL_ADC_Init(&hadc1) != HAL_OK)
   {
     Error_Handler();
@@ -695,61 +722,7 @@ static void MX_ADC1_Init(void)
   */
   sConfig.Channel = ADC_CHANNEL_0;
   sConfig.Rank = ADC_REGULAR_RANK_1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_239CYCLES_5;
-  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configure Regular Channel
-  */
-  sConfig.Channel = ADC_CHANNEL_1;
-  sConfig.Rank = ADC_REGULAR_RANK_2;
-  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configure Regular Channel
-  */
-  sConfig.Channel = ADC_CHANNEL_2;
-  sConfig.Rank = ADC_REGULAR_RANK_3;
-  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configure Regular Channel
-  */
-  sConfig.Channel = ADC_CHANNEL_3;
-  sConfig.Rank = ADC_REGULAR_RANK_4;
-  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configure Regular Channel
-  */
-  sConfig.Channel = ADC_CHANNEL_4;
-  sConfig.Rank = ADC_REGULAR_RANK_5;
-  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configure Regular Channel
-  */
-  sConfig.Channel = ADC_CHANNEL_5;
-  sConfig.Rank = ADC_REGULAR_RANK_6;
-  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Configure Regular Channel
-  */
-  sConfig.Channel = ADC_CHANNEL_6;
-  sConfig.Rank = ADC_REGULAR_RANK_7;
+  sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -793,22 +766,6 @@ static void MX_USART1_UART_Init(void)
     Device.Diag.UART_Receive_IT_ErrorCounter++;
   }
   /* USER CODE END USART1_Init 2 */
-
-}
-
-/**
-  * Enable DMA controller clock
-  */
-static void MX_DMA_Init(void)
-{
-
-  /* DMA controller clock enable */
-  __HAL_RCC_DMA1_CLK_ENABLE();
-
-  /* DMA interrupt init */
-  /* DMA1_Channel1_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 10, 0);
-  HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
 
 }
 
@@ -923,7 +880,7 @@ void UpTimeTask(void)
   if(HAL_GetTick() - timestamp > 1000)
   {
     timestamp = HAL_GetTick();
-    Device.Diag.UpTimeSec++;
+    Device.DasClock.UpTimeSec++;
   }
 }
 
