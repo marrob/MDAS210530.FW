@@ -79,9 +79,7 @@ typedef struct _DeviceTypeDef
     uint32_t RS485RequestCnt;
     uint32_t RS485UnknwonCnt;
     uint32_t RS485NotMyCmdCnt;
-
-    uint32_t UartTaskCnt;
-    uint32_t UartErrorCounter;
+    uint32_t UartErrorCnt;
 
   }Diag;
 }DeviceTypeDef;
@@ -92,9 +90,6 @@ typedef struct _AdcChannel
   uint16_t Lsb;
   float  Result;
 }AdcChannel_t;
-
-
-
 
 /* USER CODE END PTD */
 
@@ -137,8 +132,6 @@ typedef struct _AdcChannel
 #define MV205_2_I_LIMIT_MA    200
 #define ADC_UPDATE_MS         100
 
-
-
 /*** ADC ***/
 #define ADC_LSB               (3.3/4096)
 
@@ -159,7 +152,6 @@ WWDG_HandleTypeDef hwwdg;
 /* USER CODE BEGIN PV */
 LiveLED_HnadleTypeDef hLiveLed;
 DeviceTypeDef     Device;
-
 
 /*** RS485 ***/
 char    UartRxBuffer[RS485_BUFFER_SIZE];
@@ -278,12 +270,11 @@ HAL_StatusTypeDef AdcPollChannel(uint32_t ch, uint16_t *result)
   return HAL_OK;
 }
 
-
 /* UART-RS485-----------------------------------------------------------------*/
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *context)
 {
   if(HAL_UART_Receive_IT(context, (uint8_t *)&UartCharacter, 1) != HAL_OK)
-    Device.Diag.UartTaskCnt++;
+    Device.Diag.UartErrorCnt++;
   else
   {
     if(UartRxBufferPtr < RS485_BUFFER_SIZE - 1)
@@ -307,14 +298,14 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *context)
 
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 {
-  Device.Diag.UartErrorCounter++;
+  Device.Diag.UartErrorCnt++;
   __HAL_UART_CLEAR_PEFLAG(huart);
   __HAL_UART_CLEAR_FEFLAG(huart);
   __HAL_UART_CLEAR_NEFLAG(huart);
   __HAL_UART_CLEAR_OREFLAG(huart);
 
   if(HAL_UART_Receive_IT(huart, (uint8_t *)&UartCharacter, 1) != HAL_OK)
-    Device.Diag.UartErrorCounter++;
+    Device.Diag.UartErrorCnt++;
 }
 
 //char valuestr[20];
@@ -355,7 +346,7 @@ char* RS485Parser(char *line)
     else if(!strcmp(cmd,"DO?"))
        sprintf(buffer, "DO %08lX", Device.DasClock.DO);
     else if(!strcmp(cmd,"UE?"))
-      sprintf(buffer, "UE %08lX", Device.Diag.UartErrorCounter);
+      sprintf(buffer, "UE %08lX", Device.Diag.UartErrorCnt);
     else
       Device.Diag.RS485UnknwonCnt++;
   }
@@ -559,10 +550,6 @@ void ControlTask(void)
   Device.State.Pre = Device.State.Curr;
   Device.State.Curr = Device.State.Next;
 }
-
-
-
-
 
 /* USER CODE END 0 */
 
@@ -774,7 +761,7 @@ static void MX_USART1_UART_Init(void)
   }
   /* USER CODE BEGIN USART1_Init 2 */
   if(HAL_UART_Receive_IT(&huart1, (uint8_t *)&UartCharacter, 1) != HAL_OK)
-    Device.Diag.UartTaskCnt++;
+    Device.Diag.UartErrorCnt++;
   /* USER CODE END USART1_Init 2 */
 
 }
