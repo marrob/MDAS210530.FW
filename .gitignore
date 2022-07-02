@@ -11,5 +11,6 @@ Release/*
 *.user
 *.opensdf
 *.tmp
-
 /Debug/
+stm32cubeide.project.prefs
+language.settings.xml
