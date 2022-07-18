@@ -143,7 +143,7 @@ typedef struct _AdcChannel
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
- ADC_HandleTypeDef hadc1;
+ADC_HandleTypeDef hadc1;
 
 UART_HandleTypeDef huart1;
 
@@ -308,7 +308,6 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
     Device.Diag.UartErrorCnt++;
 }
 
-//char valuestr[20];
 char* RS485Parser(char *line)
 {
   unsigned int addr = 0;
@@ -322,68 +321,76 @@ char* RS485Parser(char *line)
   memset(arg1,0x00, RS485_ARG1_LENGTH);
   memset(arg2,0x00, RS485_ARG2_LENGTH);
 
-  uint8_t params = sscanf(line, "#%x %s %s %s",&addr, cmd, arg1, arg2);
+  sscanf(line, "#%x %s",&addr, cmd);
   if(addr != CLIENT_RX_ADDR)
   {
     Device.Diag.RS485NotMyCmdCnt++;
     return NULL;
   }
   Device.Diag.RS485RequestCnt++;
-  if(params == 2)
+
+  if(!strcmp(cmd, "*OPC?"))
   {
-    if(!strcmp(cmd, "*OPC?"))
-      strcpy(buffer, "OK");
-    else if(!strcmp(cmd, "FW?"))
-      sprintf(buffer, "FW %s", DEVICE_FW);
-    else if(!strcmp(cmd, "UID?"))
-      sprintf(buffer, "UID %4lX%4lX%4lX",HAL_GetUIDw0(), HAL_GetUIDw1(), HAL_GetUIDw2());
-    else if(!strcmp(cmd, "PCB?"))
-      sprintf(buffer, "PCB %s", DEVICE_PCB);
-    else if(!strcmp(cmd,"UPTIME?"))
-       sprintf(buffer, "UPTIME %08lX", Device.DasClock.UpTimeSec);
-    else if(!strcmp(cmd,"DI?"))
-       sprintf(buffer, "DI %08lX", Device.DasClock.DI);
-    else if(!strcmp(cmd,"DO?"))
-       sprintf(buffer, "DO %08lX", Device.DasClock.DO);
-    else if(!strcmp(cmd,"UE?"))
-      sprintf(buffer, "UE %08lX", Device.Diag.UartErrorCnt);
-    else
-      Device.Diag.RS485UnknwonCnt++;
+    strcpy(buffer, "OK");
   }
-  else if(params == 3)
+  else if(!strcmp(cmd, "FW?"))
   {
-    if(!strcmp(cmd,"DO"))
+    sprintf(buffer, "FW %s", DEVICE_FW);
+  }
+  else if(!strcmp(cmd, "UID?"))
+  {
+    sprintf(buffer, "UID %4lX%4lX%4lX",HAL_GetUIDw0(), HAL_GetUIDw1(), HAL_GetUIDw2());
+  }
+  else if(!strcmp(cmd, "PCB?"))
+  {
+    sprintf(buffer, "PCB %s", DEVICE_PCB);
+  }
+  else if(!strcmp(cmd,"UPTIME?"))
+  {
+     sprintf(buffer, "UPTIME %08lX", Device.DasClock.UpTimeSec);
+  }
+  else if(!strcmp(cmd,"DI?"))
+  {
+     sprintf(buffer, "DI %08lX", Device.DasClock.DI);
+  }
+  else if(!strcmp(cmd,"DO?"))
+  {
+     sprintf(buffer, "DO %08lX", Device.DasClock.DO);
+  }
+  else if(!strcmp(cmd,"UE?"))
+  {
+    sprintf(buffer, "UE %08lX", Device.Diag.UartErrorCnt);
+  }
+  else if(!strcmp(cmd,"DO"))
+  {
+    sscanf(line, "#%x %s %s",&addr, cmd, arg1);
+    Device.DasClock.DO = strtol(arg1, NULL, 16);
+    strcpy(buffer, "OK");
+  }
+  else if(!strcmp(cmd,"AI?"))
+  {
+    sscanf(line, "#%x %s %s",&addr, cmd, arg1);
+    uint8_t ch = strtol(arg1, NULL, 10);
+    if(ch < ADC_CH_COUNT)
     {
-      Device.DasClock.DO = strtol(arg1, NULL, 16);
-      strcpy(buffer, "OK");
-    }
-    else if(!strcmp(cmd,"AI?"))
-    {
-      uint8_t ch = strtol(arg1, NULL, 10);
-      if(ch < ADC_CH_COUNT)
-      {
-        char fstr[20];
-        ftoa(Meas[ch].Result, fstr, 2);
-        sprintf(buffer, "AI %d %s", ch, fstr );
-      }
-      else
-      {
-        sprintf(buffer, "AI !invalid channel");
-      }
+      char fstr[20];
+      ftoa(Meas[ch].Result, fstr, 2);
+      sprintf(buffer, "AI %d %s", ch, fstr );
     }
     else
-      Device.Diag.RS485UnknwonCnt++;
+    {
+      strcpy(buffer, "AI !invalid channel");
+    }
   }
   else
   {
     Device.Diag.RS485UnknwonCnt++;
   }
+
   static char resp[RS485_BUFFER_SIZE + 5];
   memset(resp, 0x00, RS485_BUFFER_SIZE);
   sprintf(resp, "#%02X %s", CLIENT_TX_ADDR, buffer);
-  uint8_t length = strlen(resp);
-  resp[length] = '\n';
-  resp[length + 1] = '\0';
+  strcat(resp,"\n");
   return resp;
 }
 
@@ -782,13 +789,13 @@ static void MX_WWDG_Init(void)
 
   /* USER CODE END WWDG_Init 1 */
   hwwdg.Instance = WWDG;
-  hwwdg.Init.Prescaler = WWDG_PRESCALER_8;
-  hwwdg.Init.Window = 127;
-  hwwdg.Init.Counter = 127;
+  hwwdg.Init.Prescaler = WWDG_PRESCALER_1;
+  hwwdg.Init.Window = 64;
+  hwwdg.Init.Counter = 64;
   hwwdg.Init.EWIMode = WWDG_EWI_DISABLE;
-  if (HAL_WWDG_Init(&hwwdg) != HAL_OK)
+//  if (HAL_WWDG_Init(&hwwdg) != HAL_OK)
   {
-    Error_Handler();
+//    Error_Handler();
   }
   /* USER CODE BEGIN WWDG_Init 2 */
 
